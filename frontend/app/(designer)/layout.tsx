@@ -1,4 +1,6 @@
 // frontend/app/(designer)/layout.tsx
+import Navbar from "@/components/layout/Navbar";
+
 export default function DesignerLayout({
   children,
 }: {
@@ -6,7 +8,7 @@ export default function DesignerLayout({
 }) {
   return (
     <>
-      {/* Navbar will be added in Task 13 */}
+      <Navbar />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
