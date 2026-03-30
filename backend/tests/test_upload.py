@@ -22,7 +22,7 @@ def _setup_test_with_question(client) -> tuple[int, int, int]:
     return test_id, question_id
 
 
-def test_valid_image_upload(client, media_dir):
+def test_valid_image_upload(client, test_media_dir):
     test_id, question_id = _setup_test_with_question(client)
     png_data = _create_test_png()
 
@@ -93,7 +93,7 @@ def test_valid_url_option(client):
     assert resp.json()["source_url"] == "https://example.com/design.png"
 
 
-def test_option_delete_cleans_up_files(client, media_dir):
+def test_option_delete_cleans_up_files(client, test_media_dir):
     test_id, question_id = _setup_test_with_question(client)
     png_data = _create_test_png()
 
@@ -107,9 +107,9 @@ def test_option_delete_cleans_up_files(client, media_dir):
     option_id = resp.json()["id"]
 
     # Verify files exist
-    test_media_dir = media_dir / str(test_id)
-    assert test_media_dir.exists()
-    files_before = list(test_media_dir.iterdir())
+    test_test_media_dir = test_media_dir / str(test_id)
+    assert test_test_media_dir.exists()
+    files_before = list(test_test_media_dir.iterdir())
     assert len(files_before) >= 1  # at least the original image
 
     # Delete the option

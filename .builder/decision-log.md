@@ -25,6 +25,20 @@ All autonomous decisions made by the Builder during the build pipeline.
 - **Reasoning:** Designer wants volume; tracking individuals not needed for MVP
 - **User asked:** No
 
+## [2026-03-31] Decision: Skip re-review after impl plan iteration
+- **Context:** Impl plan revised to address all merged issues from 3 reviewers. Codex already approved after 4 rounds. Fixes are targeted — parallelism groups, inlining code, N+1 fix, main.py conflict resolution.
+- **Options considered:** Re-review with all 3 reviewers, re-review with 1, proceed to implementation
+- **Chosen:** Proceed to implementation
+- **Reasoning:** Codex already approved its fixes. Claude and Feasibility issues were all addressed. No new architectural risks. Plan is now 5,435 lines of fully self-contained tasks.
+- **User asked:** No
+
+## [2026-03-31] Decision: Skip re-review after plan iteration
+- **Context:** Plan revised to address 21 issues from 3 reviewers. All fixes are well-defined (N+1 queries, file handling, URL options, rate limiting, etc.) — no fundamental architectural changes.
+- **Options considered:** Re-review with all 3 reviewers, re-review with 1, skip to impl plan
+- **Chosen:** Skip re-review, proceed to implementation plan
+- **Reasoning:** Issues were specific and targeted. Fixes don't introduce new risks. Re-reviewing 3x would cost significant time/tokens for diminishing returns. If impl plan review catches residual issues, they'll be caught there.
+- **User asked:** No
+
 ## [2026-03-31] Decision: Image aspect ratio handling
 - **Context:** Designers may upload mixed aspect ratio images
 - **Options considered:** Enforce uniform size, crop to fit, contain with uniform height

@@ -1,10 +1,10 @@
-# DesignPoll A/B Testing App -- Implementation Plan
+# DesignPoll A/B Testing App -- Detailed Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a local-first web application that lets UI/UX designers create forced-choice A/B design tests, collect locked-in responses with optional follow-up reasoning, and view results through an analytics dashboard.
 
-**Architecture:** Next.js frontend (TypeScript, Tailwind CSS, App Router) communicates via REST API with a FastAPI backend (Python, SQLModel ORM). SQLite database stores all data. Images are uploaded to the backend filesystem and served via FastAPI StaticFiles. Options support image upload OR external URL. Recharts renders analytics visualizations.
+**Architecture:** Next.js frontend (TypeScript, Tailwind CSS, App Router) communicates via REST API with a FastAPI backend (Python, SQLModel ORM). SQLite database stores all data. Images are uploaded to the backend filesystem and served via FastAPI StaticFiles. Options support image upload OR external URL. Recharts renders analytics visualizations. All pages are Client Components (no SSR data fetching) to avoid build-time backend dependency.
 
 **Tech Stack:** Next.js 14+ (App Router, TypeScript, Tailwind CSS) | FastAPI (Python 3.11+, SQLModel, Pydantic v2) | SQLite (WAL mode, foreign_keys=ON) | Recharts | Pillow (image processing) | slowapi (rate limiting)
 
@@ -12,14 +12,42 @@
 
 ## Revision History
 
+### Revision 3 -- 2026-03-31
+
+Revised based on merged feedback from three independent reviewers (OpenAI Codex gpt-5.3-codex, Claude Opus 4.6, Senior Software Architect). All critical, major, and minor issues addressed.
+
+**Critical fixes (this revision):**
+1. **All tasks are now fully self-contained.** Every task includes complete inline code. No references to "02-plan.md", "Section 9", or "lines XXXX". A subagent can implement any task from ONLY its description in this file.
+2. **Parallelism group fixes:** Task 9 (respond routes) moved out of G6 into G6b (depends on Task 6). Task 17 (test detail page) moved out of G9 into G9b (depends on Task 16). Dependency graph and parallel groups updated.
+3. **N+1 query fix in `_build_test_with_questions`.** The shared helper now batch-fetches all options for all questions in a single query, then groups in Python. No per-question option queries.
+
+**Major fixes (this revision):**
+4. **Resolved main.py concurrent modification.** Task 5 now creates a complete main.py with ALL router includes stubbed (importing from files that will exist after Tasks 6-9 complete). Tasks 6-9 only create route files, they do NOT modify main.py. Task 20 changed to verification-only (no main.py rewrite).
+5. **PRAGMA foreign_keys via event listener.** database.py now uses a SQLAlchemy `connect` event listener that runs `PRAGMA foreign_keys=ON` and `journal_mode=WAL` on every new connection. Lifespan only calls `create_db_and_tables()`.
+6. **Test DB uses StaticPool.** Test conftest uses `StaticPool` and explicit model imports before `create_all()`.
+7. **Added test_upload.py** (Task 14b) covering: valid upload, invalid MIME (400), oversized file (400), source-type transitions, option delete with file cleanup, URL scheme validation (javascript:/data:/file: rejected).
+8. **Added URL validation.** Server-side `validate_source_url()` rejecting non-http/https schemes. `rel="noopener noreferrer"` on all new-tab links.
+9. **Added decompression bomb guard.** Max pixel count check (25 megapixels) after Image.verify().
+10. **Removed contradictory "implement exactly as written" instruction** in Task 9 that conflicted with the limiter.py fix.
+
+**Minor fixes (this revision):**
+11. Pinned `create-next-app` version (`@14`) to avoid interactive prompts.
+12. Added null guard for `useParams()` in respondent pages.
+13. Added monkeypatched `MEDIA_DIR` in test fixtures to isolate from production media/.
+14. Custom followup_prompt rendered in respondent UX -- acceptance criteria verifies configured prompt text appears.
+15. Added `rel="noopener noreferrer"` on all external links.
+16. Task 1 now includes `git init` as a conditional step.
+17. Deviation note: limiter defined in `app/limiter.py` (not `main.py`) to prevent circular imports.
+18. `generate_csv` N+1 fix: batch-fetches responses in a single query, groups in Python.
+
 ### Revision 2 -- 2026-03-31
 
-Revised based on consolidated feedback from three independent reviewers (OpenAI Codex gpt-5.3-codex, Claude Opus 4.6, Senior Software Architect). All critical, major, and select minor issues addressed. Summary of changes:
+(Previous revision history preserved for reference)
 
 **Critical fixes:**
 1. N+1 queries in `list_tests`, `compute_analytics`, and `generate_csv` replaced with JOINs, GROUP BY, or batch-fetch + aggregate in Python.
 2. File upload memory bomb fixed -- stream/chunk reads, check size early, never read entire file into memory.
-3. URL option support added -- `source_type` (image/url) + `source_url` fields end-to-end (models, schemas, API, frontend).
+3. URL option support added -- `source_type` (image/url) + `source_url` fields end-to-end.
 4. Completion rate metric added to analytics response and dashboard.
 5. SQLite `PRAGMA foreign_keys=ON` added to lifespan startup.
 6. Dashboard page converted to Client Component for consistency and resilience.
@@ -30,859 +58,147 @@ Revised based on consolidated feedback from three independent reviewers (OpenAI 
 9. Rate limiting -- simple per-IP rate limit on respondent answer endpoint via slowapi.
 10. Image validation -- `Image.verify()` added after MIME check.
 11. CSV injection -- sanitize cells starting with `=`, `+`, `-`, `@`.
-12. Duplicate answer race -- catch `IntegrityError`, return 409 (replaces check-then-insert).
+12. Duplicate answer race -- catch `IntegrityError`, return 409.
 13. GIF thumbnails -- skip thumbnail generation for GIFs, serve original.
-14. Duplicated test-loading logic -- extract shared helper for building test with questions/options.
+14. Duplicated test-loading logic -- extract shared helper.
 15. `useMemo` dependency -- add `question.options.length` to dependency array.
-
-**Minor fixes:**
-16. Extract `utcnow()` to shared `app/utils.py`.
-17. `ConfirmDialog` -- add Escape key handler, `aria-modal`, `autoFocus` on cancel button.
-18. Consistent `API_BASE_URL` usage across all frontend files (no inline `process.env` fallbacks).
-19. Mobile responsive grid (`grid-cols-1 sm:grid-cols-2` instead of fixed columns).
-20. Tooltip formatter -- use payload index instead of matching by vote value.
-21. Route group restructuring -- set up `(designer)` and `(respondent)` route groups from the start (Task 11), not as a later task.
 
 ---
 
 ## Table of Contents
 
-1. [Architecture Overview](#1-architecture-overview)
-2. [Data Model](#2-data-model)
-3. [API Endpoint Design](#3-api-endpoint-design)
-4. [Frontend Page/Component Architecture](#4-frontend-pagecomponent-architecture)
-5. [Tech Stack Decisions](#5-tech-stack-decisions)
-6. [Test Lifecycle Rules](#6-test-lifecycle-rules)
-7. [Image Handling Strategy](#7-image-handling-strategy)
-8. [File Structure](#8-file-structure)
-9. [Implementation Tasks](#9-implementation-tasks)
+1. [Dependency Graph and Parallelism Map](#dependency-graph-and-parallelism-map)
+2. [File Structure Overview](#file-structure-overview)
+3. [Tech-Specific Notes and Gotchas](#tech-specific-notes-and-gotchas)
+4. [Security Considerations](#security-considerations)
+5. [Tasks 1-22](#task-1-git-init-and-root-project-files)
 
 ---
 
-## 1. Architecture Overview
+## Dependency Graph and Parallelism Map
 
 ```
-+-------------------+         HTTP (REST)        +-------------------+
-|                   |  <---------------------->  |                   |
-|   Next.js App     |    localhost:3000           |   FastAPI App     |
-|   (Frontend)      |    ----requests--->         |   (Backend)       |
-|                   |    <---JSON/CSV----         |                   |
-|  - App Router     |                            |  - SQLModel ORM   |
-|  - Tailwind CSS   |                            |  - Pydantic v2    |
-|  - Recharts       |                            |  - Pillow         |
-|  - TypeScript     |                            |  - Python 3.11+   |
-+-------------------+                            |  - slowapi         |
-                                                 +-------------------+
-                                                        |
-                                                        | SQLite (WAL, FK=ON)
-                                                        v
-                                                 +-------------+
-                                                 |  data/       |
-                                                 |  app.db      |
-                                                 +-------------+
-                                                        |
-                                                 +-------------+
-                                                 |  media/      |
-                                                 |  {test_id}/  |
-                                                 |  images...   |
-                                                 +-------------+
+                    Task 1: Git Init + Root Files
+                              |
+              +---------------+---------------+
+              |                               |
+     Task 2: Backend Scaffold         Task 11: Frontend Scaffold
+              |                               |
+     Task 3: Database Models           Task 12: Frontend Types + API Client
+              |                               |
+     Task 4: Pydantic Schemas          Task 13: Shared UI Components
+              |                               |
+     Task 5: Image Service +                  |
+             Complete main.py                 |
+              |                               |
+     +--------+--------+                      |
+     |        |        |                      |
+  Task 6  Task 7  Task 8                     |
+  (Tests) (Qs)   (Opts)                      |
+     |        |        |                      |
+     +--------+--------+                      |
+              |                               |
+     Task 9: Respond Routes                   |
+     (depends on Task 6)                      |
+              |                               |
+     Task 10: Analytics Routes                |
+              |                               |
+     Task 14: Backend Integration Test        |
+              |                               |
+     Task 14b: Upload + URL Validation Tests  |
+              |                               |
+              +---------------+---------------+
+                              |
+              +-------+-------+-------+
+              |       |               |
+          Task 15  Task 16         Task 18
+          (Dash)   (Builder)       (Respond)
+              |       |               |
+              +-------+               |
+                      |               |
+                 Task 17              |
+                 (Detail)             |
+                      |               |
+                      +-------+-------+
+                              |
+                        Task 19: Analytics Page
+                              |
+                        Task 20: Verification + Gitignore
+                              |
+                        Task 21: End-to-End Smoke Test
+                              |
+                        Task 22: Final Commit
 ```
 
-### How They Connect
+### Parallelism Groups
 
-- **Frontend to Backend:** The Next.js app makes `fetch()` calls to `http://localhost:8000/api/v1/...`. All data-fetching pages are Client Components that call the backend via the browser (not SSR), ensuring the backend does not need to be running at build time.
-- **CORS:** FastAPI middleware allows origin `http://localhost:3000` with methods GET, POST, PATCH, DELETE.
-- **Image Serving:** FastAPI mounts `media/` as a static directory at `/media`. The frontend renders images as `<img src="http://localhost:8000/media/{test_id}/{filename}" />`. For URL-based options, the frontend renders a sandboxed iframe or "Open in new tab" link.
-- **Database:** Single SQLite file at `backend/data/app.db`. WAL mode enabled for concurrent read performance. `PRAGMA foreign_keys=ON` enabled at startup to enforce cascade deletes. `check_same_thread=False` for FastAPI's threaded request handling.
-- **Rate Limiting:** Per-IP rate limit on the respondent answer endpoint via slowapi to prevent submission flooding.
+| Group | Tasks | Can Run In Parallel? | Rationale |
+|-------|-------|---------------------|-----------|
+| **G1** | Task 1 | No (sequential) | Must exist before anything else |
+| **G2** | Task 2, Task 11 | YES | Backend and frontend scaffolds are independent |
+| **G3** | Task 3 | No | Depends on Task 2 |
+| **G4** | Task 4, Task 12, Task 13 | YES | Schemas (depends on T3), frontend types+API (depends on T11), shared UI (depends on T11) are independent of each other |
+| **G5** | Task 5 | No | Depends on Task 4. Also creates the complete main.py with all router stubs. |
+| **G6** | Task 6, Task 7, Task 8 | YES | These three route files depend on T5 but not on each other. They do NOT modify main.py. |
+| **G6b** | Task 9 | No | Depends on Task 6 (imports `_build_test_with_questions` from tests.py). Runs after G6. |
+| **G7** | Task 10 | No | Depends on T6-T9 (uses same DB session patterns) |
+| **G8** | Task 14, Task 14b | YES | Integration tests depend on all backend routes; test_workflow and test_upload are independent test files |
+| **G9** | Task 15, Task 16, Task 18 | YES | Dashboard, builder, and respondent pages depend on T12+T13 but not on each other |
+| **G9b** | Task 17 | No | Depends on Task 16 (imports QuestionEditor, TestMetaForm). Runs after G9. |
+| **G10** | Task 19 | No | Analytics page depends on Recharts install + T15-T18 patterns |
+| **G11** | Task 20 | No | Verification depends on all prior tasks |
+| **G12** | Task 21 | No | Smoke test depends on everything |
+| **G13** | Task 22 | No | Final commit |
 
 ---
 
-## 2. Data Model
+## File Structure Overview
 
-### Entity-Relationship Diagram
-
-```
-Test (1) -----> (N) ScreenQuestion (1) -----> (N) Option
-                        |                         |
-                        |                         |
-                        +-------> (N) Response <---+
-                                    |
-                              session_id (UUID)
-                              groups one respondent
-```
-
-### Table: `test`
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | Integer | PK, auto-increment | |
-| `slug` | String(16) | UNIQUE, NOT NULL, indexed | Generated via `secrets.token_urlsafe(8)` |
-| `name` | String(200) | NOT NULL | Test title |
-| `description` | String(2000) | nullable | Intro text shown to respondents |
-| `status` | String(10) | NOT NULL, default `"draft"` | Enum: `draft`, `active`, `closed` |
-| `created_at` | DateTime | NOT NULL, default `utcnow` | |
-| `updated_at` | DateTime | NOT NULL, default `utcnow`, on-update `utcnow` | |
-
-### Table: `screenquestion`
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | Integer | PK, auto-increment | |
-| `test_id` | Integer | FK -> `test.id`, NOT NULL, ON DELETE CASCADE | |
-| `order` | Integer | NOT NULL, default 0 | Display sequence |
-| `title` | String(500) | NOT NULL | E.g., "Which homepage do you prefer?" |
-| `followup_prompt` | String(500) | NOT NULL, default `"Why did you choose this?"` | |
-| `followup_required` | Boolean | NOT NULL, default `False` | |
-| `randomize_options` | Boolean | NOT NULL, default `True` | Per-question toggle; default randomized |
-| `created_at` | DateTime | NOT NULL, default `utcnow` | |
-
-Index: `(test_id)` for loading all questions of a test.
-
-### Table: `option`
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | Integer | PK, auto-increment | |
-| `screen_question_id` | Integer | FK -> `screenquestion.id`, NOT NULL, ON DELETE CASCADE | |
-| `label` | String(200) | NOT NULL | E.g., "Option A" |
-| `source_type` | String(10) | NOT NULL, default `"upload"` | Either `"upload"` or `"url"` |
-| `image_filename` | String(255) | nullable | UUID-based filename stored on disk (for source_type=upload) |
-| `original_filename` | String(255) | nullable | User's original filename for reference (for source_type=upload) |
-| `source_url` | String(2000) | nullable | External URL (for source_type=url) |
-| `order` | Integer | NOT NULL, default 0 | Display order (when randomization is off) |
-| `created_at` | DateTime | NOT NULL, default `utcnow` | |
-
-Index: `(screen_question_id)` for loading all options of a question.
-
-### Table: `response`
-
-| Column | Type | Constraints | Notes |
-|---|---|---|---|
-| `id` | Integer | PK, auto-increment | |
-| `screen_question_id` | Integer | FK -> `screenquestion.id`, NOT NULL, ON DELETE CASCADE | |
-| `option_id` | Integer | FK -> `option.id`, NOT NULL, ON DELETE CASCADE | |
-| `session_id` | String(36) | NOT NULL, indexed | UUID generated client-side |
-| `followup_text` | String(500) | nullable | Max 500 chars |
-| `created_at` | DateTime | NOT NULL, default `utcnow` | |
-
-Unique constraint: `(session_id, screen_question_id)` -- one answer per question per session.
-Index: `(screen_question_id)` for vote aggregation.
-Index: `(session_id)` for grouping by respondent.
-
-### Relationships and Cascade Rules
-
-- Deleting a `Test` cascades to all its `ScreenQuestion` rows.
-- Deleting a `ScreenQuestion` cascades to all its `Option` and `Response` rows.
-- Deleting an `Option` cascades to all `Response` rows referencing it.
-- SQLModel/SQLAlchemy `cascade="all, delete-orphan"` on the parent side of each relationship.
-- **Important:** `PRAGMA foreign_keys=ON` must be enabled at startup for SQLite to enforce ON DELETE CASCADE at the database level.
-
-### Design Notes
-
-- **`source_type` enum on Option.** Each option supports either image upload (`source_type="upload"`) or external URL (`source_type="url"`). When `source_type="upload"`, an image file must be provided. When `source_type="url"`, `source_url` must be provided. Switching source types clears stale data from the previous type.
-- **`randomize_options` on ScreenQuestion.** Default `True` per the decision log. When true, the frontend shuffles option order per page load.
-- **`session_id` is a plain string**, not an FK. No respondent table needed. Known limitation: `session_id` is client-controlled and can be forged via direct API calls. For the local-first MVP scope, this is an acceptable tradeoff. Consider adding server-generated session tokens in a future iteration.
-- **`utcnow()` is defined once** in `app/utils.py` and imported by all model files.
-
----
-
-## 3. API Endpoint Design
-
-All endpoints prefixed with `/api/v1`. Request and response bodies are JSON unless noted.
-
-### 3.1 Tests CRUD
-
-#### `POST /api/v1/tests` -- Create a new test
-
-Request:
-```json
-{
-  "name": "Homepage A/B Test",
-  "description": "Which homepage layout do users prefer?"
-}
-```
-
-Response (201):
-```json
-{
-  "id": 1,
-  "slug": "aB3x_kM2pQ4",
-  "name": "Homepage A/B Test",
-  "description": "Which homepage layout do users prefer?",
-  "status": "draft",
-  "created_at": "2026-03-31T12:00:00Z",
-  "updated_at": "2026-03-31T12:00:00Z"
-}
-```
-
-Validation: `name` required, max 200 chars. `description` optional, max 2000 chars.
-
-#### `GET /api/v1/tests` -- List all tests
-
-Response (200):
-```json
-[
-  {
-    "id": 1,
-    "slug": "aB3x_kM2pQ4",
-    "name": "Homepage A/B Test",
-    "description": "Which homepage layout do users prefer?",
-    "status": "draft",
-    "created_at": "2026-03-31T12:00:00Z",
-    "updated_at": "2026-03-31T12:00:00Z",
-    "question_count": 3,
-    "response_count": 42
-  }
-]
-```
-
-Notes: Includes `question_count` and `response_count` as computed fields. **Uses a single query with JOINs and GROUP BY** to avoid N+1 queries.
-
-#### `GET /api/v1/tests/{test_id}` -- Get test with all questions and options
-
-Response (200):
-```json
-{
-  "id": 1,
-  "slug": "aB3x_kM2pQ4",
-  "name": "Homepage A/B Test",
-  "description": "Which homepage layout do users prefer?",
-  "status": "draft",
-  "created_at": "2026-03-31T12:00:00Z",
-  "updated_at": "2026-03-31T12:00:00Z",
-  "questions": [
-    {
-      "id": 1,
-      "order": 0,
-      "title": "Which homepage layout?",
-      "followup_prompt": "Why did you choose this?",
-      "followup_required": false,
-      "randomize_options": true,
-      "options": [
-        {
-          "id": 1,
-          "label": "Option A",
-          "source_type": "upload",
-          "image_url": "/media/1/abc123.png",
-          "source_url": null,
-          "order": 0
-        },
-        {
-          "id": 2,
-          "label": "Option B",
-          "source_type": "url",
-          "image_url": null,
-          "source_url": "https://example.com/design-b",
-          "order": 1
-        }
-      ]
-    }
-  ]
-}
-```
-
-Notes: `image_url` in the response is a computed URL path (not the raw filename). The backend constructs it from `image_filename` and `test_id`. Uses the shared `_build_test_with_questions()` helper to construct the nested response.
-
-#### `PATCH /api/v1/tests/{test_id}` -- Update test
-
-Request (all fields optional):
-```json
-{
-  "name": "Updated Name",
-  "description": "Updated description",
-  "status": "active"
-}
-```
-
-Response (200): Full test object.
-
-Validation rules:
-- If test is `active` or `closed`, only `name`, `description`, and `status` can be changed.
-- Status transitions allowed: `draft -> active`, `active -> closed`, `draft -> closed`. No going backward.
-- To transition `draft -> active`: test must have at least one question, and every question must have at least 2 options and at most 5 options.
-
-#### `DELETE /api/v1/tests/{test_id}` -- Delete test
-
-Response (204): No content. Cascades to questions, options, responses. **Commits the DB delete first**, then deletes the `media/{test_id}/` directory from disk afterward.
-
-### 3.2 Screen Questions
-
-#### `POST /api/v1/tests/{test_id}/questions` -- Add a question
-
-Request:
-```json
-{
-  "title": "Which checkout flow do you prefer?",
-  "followup_prompt": "What made you choose this?",
-  "followup_required": true,
-  "randomize_options": true
-}
-```
-
-Response (201): Full question object with `id`, `order` (auto-assigned as max+1), `created_at`.
-
-Validation: Test must be in `draft` status. `title` required, max 500 chars. `followup_prompt` defaults to `"Why did you choose this?"`. `randomize_options` defaults to `true`.
-
-#### `PATCH /api/v1/questions/{question_id}` -- Update a question
-
-Request (all fields optional):
-```json
-{
-  "title": "Updated title",
-  "followup_prompt": "Updated prompt",
-  "followup_required": false,
-  "randomize_options": false,
-  "order": 2
-}
-```
-
-Response (200): Full question object.
-
-Validation: Parent test must be in `draft` status.
-
-#### `DELETE /api/v1/questions/{question_id}` -- Delete a question
-
-Response (204): No content. Cascades to options and responses. **Before deleting, iterates over the question's options and calls `delete_image()` for each one with an `image_filename`** to prevent orphaned image files on disk.
-
-Validation: Parent test must be in `draft` status.
-
-### 3.3 Options
-
-#### `POST /api/v1/questions/{question_id}/options` -- Add an option (multipart)
-
-Request: `multipart/form-data`
-- `label` (string, required): Option label, max 200 chars
-- `source_type` (string, optional): `"upload"` (default) or `"url"`
-- `order` (integer, optional): Display order, default auto-assigned
-- `image` (file, optional): Image file (JPEG, PNG, WebP, GIF; max 10MB) -- required when `source_type=upload`
-- `source_url` (string, optional): External URL -- required when `source_type=url`
-
-Response (201):
-```json
-{
-  "id": 1,
-  "label": "Option A",
-  "source_type": "upload",
-  "image_url": "/media/1/abc123.png",
-  "source_url": null,
-  "order": 0,
-  "created_at": "2026-03-31T12:00:00Z"
-}
-```
-
-Validation:
-- Parent question's test must be in `draft` status.
-- Question must have fewer than 5 existing options (max 5 per question).
-- If `source_type=upload`, an image file must be provided. File validated for type, size, and `Image.verify()`.
-- If `source_type=url`, `source_url` must be provided (non-empty, valid URL).
-- Returns 400 if invariants are violated.
-
-#### `PATCH /api/v1/options/{option_id}` -- Update an option (multipart)
-
-Request: `multipart/form-data`
-- `label` (string, optional) -- if provided and empty after stripping, returns 400
-- `source_type` (string, optional): `"upload"` or `"url"`
-- `order` (integer, optional)
-- `image` (file, optional): Replaces existing image -- **saves new file first**, then deletes old file after DB commit
-- `source_url` (string, optional): External URL
-
-Source-type transition logic:
-- Switching from upload to URL: delete old image files post-commit, clear `image_filename`/`original_filename`, set `source_url`.
-- Switching from URL to upload: require image file, clear `source_url`, save new image.
-
-Response (200): Full option object.
-
-Validation: Parent question's test must be in `draft` status.
-
-#### `DELETE /api/v1/options/{option_id}` -- Delete an option
-
-Response (204): No content. Deletes image file from disk. Cascades to responses.
-
-Validation: Parent question's test must be in `draft` status. Cannot delete if question would drop below 2 options AND test is about to be activated (but allow deletion in draft even if it goes to 0 -- they are still building).
-
-### 3.4 Respondent-Facing
-
-#### `GET /api/v1/respond/{slug}` -- Get test for respondent
-
-Response (200):
-```json
-{
-  "id": 1,
-  "name": "Homepage A/B Test",
-  "description": "Which homepage layout do users prefer?",
-  "questions": [
-    {
-      "id": 1,
-      "order": 0,
-      "title": "Which homepage layout?",
-      "followup_prompt": "Why did you choose this?",
-      "followup_required": false,
-      "randomize_options": true,
-      "options": [
-        {
-          "id": 1,
-          "label": "Option A",
-          "source_type": "upload",
-          "image_url": "/media/1/abc123.png",
-          "source_url": null,
-          "order": 0
-        },
-        {
-          "id": 2,
-          "label": "Option B",
-          "source_type": "url",
-          "image_url": null,
-          "source_url": "https://example.com/design-b",
-          "order": 1
-        }
-      ]
-    }
-  ]
-}
-```
-
-Validation: Returns 404 if slug not found. Returns 403 with message `"This test is not currently accepting responses"` if test status is not `active`.
-
-Notes: This endpoint intentionally omits `status`, `slug`, analytics data, and timestamps. It returns only what the respondent needs. Uses the shared `_build_test_with_questions()` helper.
-
-#### `POST /api/v1/respond/{slug}/answers` -- Submit one answer
-
-**Rate limited:** Per-IP limit (e.g., 30 requests/minute) via slowapi to prevent submission flooding.
-
-Request:
-```json
-{
-  "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "question_id": 1,
-  "option_id": 2,
-  "followup_text": "I liked the cleaner layout"
-}
-```
-
-Response (201):
-```json
-{
-  "status": "saved"
-}
-```
-
-Validation:
-- Test must be `active`.
-- `question_id` must belong to this test.
-- `option_id` must belong to this question.
-- `followup_text` max 500 chars. If `followup_required` is true on the question, `followup_text` must be non-empty.
-- Duplicate detection: **catch `IntegrityError` on commit** (from the unique constraint on `(session_id, screen_question_id)`) and return 409 Conflict with message `"Already answered this question in this session"`. This replaces the previous check-then-insert pattern to eliminate the race condition window.
-
-### 3.5 Analytics
-
-#### `GET /api/v1/tests/{test_id}/analytics` -- Get analytics
-
-Response (200):
-```json
-{
-  "test_id": 1,
-  "test_name": "Homepage A/B Test",
-  "total_sessions": 42,
-  "total_answers": 120,
-  "completed_sessions": 38,
-  "completion_rate": 90.5,
-  "questions": [
-    {
-      "question_id": 1,
-      "title": "Which homepage layout?",
-      "total_votes": 42,
-      "options": [
-        {
-          "option_id": 1,
-          "label": "Option A",
-          "image_url": "/media/1/abc123.png",
-          "source_type": "upload",
-          "source_url": null,
-          "votes": 28,
-          "percentage": 66.7,
-          "is_winner": true,
-          "followup_texts": [
-            {"text": "Clean layout", "created_at": "2026-03-31T12:00:00Z"},
-            {"text": "Better spacing", "created_at": "2026-03-31T12:01:00Z"}
-          ]
-        },
-        {
-          "option_id": 2,
-          "label": "Option B",
-          "image_url": null,
-          "source_type": "url",
-          "source_url": "https://example.com/design-b",
-          "votes": 14,
-          "percentage": 33.3,
-          "is_winner": false,
-          "followup_texts": [
-            {"text": "More colorful", "created_at": "2026-03-31T12:02:00Z"}
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-Notes:
-- `is_winner` is true for the option with the most votes per question. Ties: all tied options are winners. `percentage` is rounded to 1 decimal. `total_sessions` counts distinct `session_id` values.
-- **`completed_sessions`:** Count of distinct `session_id` values that have a response for every question in the test.
-- **`completion_rate`:** `completed_sessions / total_sessions * 100`, rounded to 1 decimal. 0.0 if no sessions.
-- **Analytics uses batch-fetch:** All responses for the test are loaded in a single query, then aggregated in Python to avoid N+1 queries.
-
-#### `GET /api/v1/tests/{test_id}/export` -- Download CSV
-
-Response: `Content-Type: text/csv` with `Content-Disposition: attachment; filename="test-{slug}-responses.csv"`
-
-CSV columns:
-```
-question_title,option_label,followup_text,session_id,responded_at
-"Which homepage layout?","Option A","Clean layout","550e8400...","2026-03-31T12:00:00Z"
-```
-
-Notes: One row per response. If no responses, export headers only. **All string cells are sanitized for CSV injection:** cells starting with `=`, `+`, `-`, or `@` are prefixed with a single quote `'` to prevent formula execution in spreadsheet applications. Options are pre-fetched in a single query and stored in a lookup dictionary to avoid N+1 queries.
-
----
-
-## 4. Frontend Page/Component Architecture
-
-### 4.1 Page Structure (Next.js App Router)
-
-Route groups are set up from the start to cleanly separate designer and respondent experiences.
-
-```
-frontend/
-  app/
-    layout.tsx                -- Root layout: html, body, Tailwind (no Navbar)
-    (designer)/
-      layout.tsx              -- Designer layout: includes Navbar
-      page.tsx                -- Dashboard: list all tests (Client Component)
-      tests/
-        new/
-          page.tsx            -- Test builder: create new test (Client Component)
-        [testId]/
-          page.tsx            -- Test detail/edit (Client Component)
-          analytics/
-            page.tsx          -- Analytics dashboard (Client Component -- charts)
-    respond/
-      [slug]/
-        layout.tsx            -- Respondent layout: clean, no Navbar
-        page.tsx              -- Respondent flow (Client Component)
-```
-
-### 4.2 Component Tree
-
-```
-components/
-  layout/
-    Navbar.tsx                -- Top navigation bar with logo and links
-  test-builder/
-    TestMetaForm.tsx          -- Name + description fields
-    QuestionEditor.tsx        -- Single question: title, followup config, options list
-    OptionEditor.tsx          -- Single option: label, source type toggle, image upload or URL input, delete
-    ImageUploader.tsx          -- File input with drag-and-drop, preview, size validation
-  respondent/
-    IntroScreen.tsx           -- Test name, description, "Start" button
-    QuestionView.tsx          -- Displays one question with all option cards
-    OptionCard.tsx            -- Single option: image/iframe, label, click-to-select, lock-in state
-    FollowUpInput.tsx         -- Text area with character counter (500 max)
-    ProgressBar.tsx           -- "Question 2 of 5" with visual bar
-  analytics/
-    SummaryStats.tsx          -- Total responses, sessions count, completion rate
-    VoteChart.tsx             -- Bar or pie chart for one question (toggle between views)
-    FollowUpList.tsx          -- List of follow-up texts grouped by option
-    ExportButton.tsx          -- CSV download button
-  shared/
-    Button.tsx                -- Styled button (variants: primary, secondary, danger)
-    Card.tsx                  -- Card wrapper with shadow and padding
-    EmptyState.tsx            -- "No data yet" with icon and message
-    StatusBadge.tsx           -- Colored badge for draft/active/closed
-    ConfirmDialog.tsx         -- "Are you sure?" modal (with Escape key, aria-modal, autoFocus)
-```
-
-### 4.3 Data Flow
-
-```
-lib/
-  api.ts                      -- All fetch calls to backend, typed responses
-  types.ts                    -- TypeScript interfaces matching API response shapes
-  constants.ts                -- API_BASE_URL = "http://localhost:8000"
-```
-
-**`lib/api.ts` functions:**
-
-| Function | Method | Endpoint | Returns |
-|---|---|---|---|
-| `fetchTests()` | GET | `/api/v1/tests` | `Test[]` |
-| `fetchTest(testId)` | GET | `/api/v1/tests/{testId}` | `TestDetail` |
-| `createTest(data)` | POST | `/api/v1/tests` | `Test` |
-| `updateTest(testId, data)` | PATCH | `/api/v1/tests/{testId}` | `Test` |
-| `deleteTest(testId)` | DELETE | `/api/v1/tests/{testId}` | `void` |
-| `createQuestion(testId, data)` | POST | `/api/v1/tests/{testId}/questions` | `Question` |
-| `updateQuestion(questionId, data)` | PATCH | `/api/v1/questions/{questionId}` | `Question` |
-| `deleteQuestion(questionId)` | DELETE | `/api/v1/questions/{questionId}` | `void` |
-| `createOption(questionId, formData)` | POST | `/api/v1/questions/{questionId}/options` | `Option` |
-| `updateOption(optionId, formData)` | PATCH | `/api/v1/options/{optionId}` | `Option` |
-| `deleteOption(optionId)` | DELETE | `/api/v1/options/{optionId}` | `void` |
-| `fetchTestForRespondent(slug)` | GET | `/api/v1/respond/{slug}` | `RespondentTest` |
-| `submitAnswer(slug, data)` | POST | `/api/v1/respond/{slug}/answers` | `{status: string}` |
-| `fetchAnalytics(testId)` | GET | `/api/v1/tests/{testId}/analytics` | `Analytics` |
-| `exportCSV(testId)` | GET | `/api/v1/tests/{testId}/export` | `Blob` (triggers download) |
-
-**All frontend files use `API_BASE_URL` from `lib/constants.ts`** -- no inline `process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"` fallbacks anywhere.
-
-**`lib/types.ts` interfaces:**
-
-```typescript
-interface Test {
-  id: number;
-  slug: string;
-  name: string;
-  description: string | null;
-  status: "draft" | "active" | "closed";
-  created_at: string;
-  updated_at: string;
-  question_count: number;
-  response_count: number;
-}
-
-interface Option {
-  id: number;
-  label: string;
-  source_type: "upload" | "url";
-  image_url: string | null;
-  source_url: string | null;
-  order: number;
-  created_at: string;
-}
-
-interface Question {
-  id: number;
-  order: number;
-  title: string;
-  followup_prompt: string;
-  followup_required: boolean;
-  randomize_options: boolean;
-  options: Option[];
-}
-
-interface TestDetail extends Omit<Test, "question_count" | "response_count"> {
-  questions: Question[];
-}
-
-interface RespondentTest {
-  id: number;
-  name: string;
-  description: string | null;
-  questions: Question[];
-}
-
-interface OptionAnalytics {
-  option_id: number;
-  label: string;
-  source_type: "upload" | "url";
-  image_url: string | null;
-  source_url: string | null;
-  votes: number;
-  percentage: number;
-  is_winner: boolean;
-  followup_texts: { text: string; created_at: string }[];
-}
-
-interface QuestionAnalytics {
-  question_id: number;
-  title: string;
-  total_votes: number;
-  options: OptionAnalytics[];
-}
-
-interface Analytics {
-  test_id: number;
-  test_name: string;
-  total_sessions: number;
-  total_answers: number;
-  completed_sessions: number;
-  completion_rate: number;
-  questions: QuestionAnalytics[];
-}
-```
-
-### 4.4 Key UX Flows
-
-**Respondent Flow State (managed in `respond/[slug]/page.tsx`):**
-
-```
-State: {
-  currentQuestionIndex: number      // 0-based, which question is shown
-  phase: "intro" | "question" | "done"
-  selectedOptionId: number | null   // current question's selection
-  isLocked: boolean                 // once selected, locked in
-  followupText: string              // current question's followup input
-  sessionId: string                 // UUID generated on mount
-}
-```
-
-Flow:
-1. Mount: generate `sessionId` via `crypto.randomUUID()`, fetch test data, show intro.
-2. User clicks "Start" -> phase = "question", index = 0.
-3. User clicks an option -> `selectedOptionId` set, `isLocked = true`, show follow-up input.
-4. User types follow-up (optional/required per question), clicks "Next".
-5. On "Next": POST answer to backend, increment `currentQuestionIndex`, reset `selectedOptionId`/`isLocked`/`followupText`.
-6. After last question: phase = "done", show thank-you screen.
-
-**Option Randomization:** When rendering a question where `randomize_options` is true, shuffle the options array using a Fisher-Yates shuffle before displaying. The shuffle happens once when the question is first shown (not on re-render). **The `useMemo` dependency array includes `question.id`, `question.randomize_options`, and `question.options.length`** to correctly re-shuffle when options change.
-
-**Image Display:** Option images rendered with responsive heights and `object-fit: contain`. **Grid uses responsive columns: `grid-cols-1 sm:grid-cols-2`** instead of fixed column counts, ensuring mobile compatibility.
-
-**URL Options:** For options with `source_type="url"`, the `OptionCard` renders a sandboxed iframe with `pointer-events: none` (to prevent the iframe from absorbing selection clicks) and provides a separate "Open in new tab" link. Note: some external sites may refuse iframe embedding due to `X-Frame-Options` or CSP headers; the fallback link mitigates this.
-
----
-
-## 5. Tech Stack Decisions
-
-| Technology | Role | Justification |
-|---|---|---|
-| **Next.js 14+ (App Router)** | Frontend framework | Modern React with file-based routing. App Router is the current standard. TypeScript for type safety. The user is a frontend novice -- conventional patterns and file-based routing reduce cognitive load. |
-| **Tailwind CSS** | Styling | Utility-first CSS, no separate stylesheet management. Works well for developers who are not CSS experts. |
-| **FastAPI** | Backend framework | Python (user's strength). Async-capable, auto-generates OpenAPI docs, excellent Pydantic integration for validation. |
-| **SQLModel** | ORM | Combines SQLAlchemy + Pydantic in one model definition. FastAPI-recommended. Eliminates schema duplication. |
-| **SQLite (WAL mode, FK=ON)** | Database | Zero-cost, no server to manage, local-first. WAL mode handles concurrent reads. `PRAGMA foreign_keys=ON` ensures cascade deletes work at the database level. Sufficient for a single-designer local app. |
-| **Recharts** | Charts | React-native charting library. Simple API with `ResponsiveContainer`, `BarChart`, `PieChart`. Well-documented. |
-| **Pillow** | Image processing | Python standard for image manipulation. Used to validate uploads (`Image.verify()`) and generate thumbnails on upload for fast respondent page loads. |
-| **slowapi** | Rate limiting | Lightweight per-IP rate limiter for FastAPI. Used on the respondent answer endpoint to prevent submission flooding. |
-| **`secrets.token_urlsafe(8)`** | Slug generation | Python stdlib, no extra dependency. Produces 11-char URL-safe slugs with low collision probability. |
-| **`useState` + `fetch`** | Frontend state/data | Minimal complexity. No extra libraries (SWR, TanStack Query). The app has simple data flows that do not justify a state management library. |
-
----
-
-## 6. Test Lifecycle Rules
-
-### States
-
-| State | Meaning | Allowed Actions |
-|---|---|---|
-| `draft` | Test is being built. Not visible to respondents. | Full CRUD on test, questions, options. Can transition to `active` or `closed`. |
-| `active` | Test is live. Respondents can take it via the shareable link. | Edit test `name` and `description` only. Transition to `closed`. Questions and options are locked. |
-| `closed` | Test is archived. No new responses accepted. | Edit test `name` and `description` only. No state transitions (terminal). |
-
-### Transition Rules
-
-```
-draft -----> active    (requires: >= 1 question, every question has >= 2 and <= 5 options)
-draft -----> closed    (allowed unconditionally)
-active ----> closed    (allowed unconditionally)
-```
-
-No backward transitions. Once `active`, cannot go back to `draft`. Once `closed`, cannot reopen.
-
-### Enforcement
-
-- **Backend:** The `PATCH /api/v1/tests/{test_id}` endpoint validates all transition rules. Returns 400 with a descriptive error message if a transition is invalid. Activation checks include 2-5 options per question.
-- **Backend:** All question/option create/update/delete endpoints check `test.status == "draft"` and return 403 if not.
-- **Backend:** The `POST /api/v1/respond/{slug}/answers` endpoint checks `test.status == "active"` and returns 403 if not.
-- **Frontend:** The test detail page conditionally renders edit controls based on `test.status`. The "Activate" button is disabled if validation fails (shown with a tooltip explaining why). The "Add Option" button is hidden when a question already has 5 options.
-
----
-
-## 7. Image Handling Strategy
-
-### Upload Flow
-
-1. **Frontend:** User selects `source_type` for each option -- either "Image Upload" or "URL". A radio toggle in `OptionEditor` switches between modes.
-2. **For Image Upload mode:**
-   - User selects a file via `<input type="file">` or drag-and-drop in `ImageUploader.tsx`.
-   - **Frontend validation:** Check file size < 10MB and type is JPEG/PNG/WebP/GIF. Show error immediately if invalid.
-   - **Frontend:** Construct `FormData` with `label`, `source_type=upload`, `order`, and `image` fields. POST to `/api/v1/questions/{questionId}/options`.
-   - **Backend validation:** Verify `content_type` is in `["image/jpeg", "image/png", "image/webp", "image/gif"]`. **Read the file in chunks** -- use `file.read(MAX_IMAGE_SIZE_BYTES + 1)` and check size immediately (never read entire file into memory unbounded). Then call `Image.verify()` on the content to reject spoofed non-image files.
-   - **Backend processing:**
-     - Generate UUID filename: `{uuid4}.{extension}` (e.g., `a1b2c3d4.png`).
-     - Create directory `media/{test_id}/` if it does not exist.
-     - Save original file to `media/{test_id}/{uuid}.{ext}`.
-     - Generate thumbnail: **skip thumbnail for GIFs** (serve original to preserve animation). For other formats, resize to max 800px width (maintaining aspect ratio) using Pillow. Save to `media/{test_id}/thumb_{uuid}.{ext}`.
-     - Store `image_filename` (the UUID-based name) in the database.
-   - **Backend response:** Return `image_url` as `/media/{test_id}/{uuid}.{ext}`, `source_type` as `"upload"`.
-3. **For URL mode:**
-   - User enters an external URL in the `OptionEditor` URL input field.
-   - **Frontend:** Construct `FormData` with `label`, `source_type=url`, `source_url`, and `order`. POST to endpoint.
-   - **Backend validation:** Verify `source_url` is non-empty. Store in `source_url` field.
-   - **Backend response:** Return `source_url`, `source_type` as `"url"`, `image_url` as null.
-
-### Serving
-
-- FastAPI mounts: `app.mount("/media", StaticFiles(directory="media"), name="media")`.
-- Frontend uses `API_BASE_URL` from `lib/constants.ts` everywhere (no inline `process.env` fallbacks).
-- For upload options: `<img>` tags with `src={API_BASE_URL + option.image_url}`.
-- For URL options: sandboxed `<iframe>` with `pointer-events: none` + "Open in new tab" link.
-- Thumbnails served to respondent flow: `src={API_BASE_URL + "/media/{test_id}/thumb_" + filename}`. GIFs use the original (no thumb_ prefix).
-
-### Cleanup
-
-- Deleting an option removes its image files from disk (both original and thumbnail) if `source_type=upload`.
-- **Deleting a question:** iterates over its options and calls `delete_image()` for each one with an `image_filename` before the cascade delete, preventing orphaned files.
-- Deleting a test: **commits DB delete first**, then removes the entire `media/{test_id}/` directory. This ordering ensures database consistency even if file deletion fails.
-- **Replacing an image (via PATCH):** saves the new image file first, updates DB, then deletes old files post-commit. This prevents data loss if the new save fails.
-
-### Source-Type Transitions
-
-- Switching from upload to URL: saves the new `source_url`, clears `image_filename`/`original_filename` in DB, commits, then deletes old image files.
-- Switching from URL to upload: requires an image file, saves it, clears `source_url` in DB, commits.
-
-### Security
-
-- UUID filenames prevent path traversal attacks.
-- File extension validated against allowlist.
-- **`Image.verify()` called after MIME check** to reject files that have a valid MIME header but are not actual images.
-- Original user-supplied filenames stored in DB for display but never used in file paths.
-- `StaticFiles` serves from a contained directory -- no escape possible.
-
----
-
-## 8. File Structure
-
-### Backend
+### Backend (`backend/`)
 
 ```
 backend/
-  main.py                           -- FastAPI app creation, CORS, StaticFiles mount, router inclusion, lifespan, rate limiter setup
-  requirements.txt                  -- fastapi, uvicorn, sqlmodel, pillow, python-multipart, slowapi
+  main.py                           -- FastAPI app, CORS, StaticFiles, lifespan, rate limiter, ALL router includes
+  requirements.txt                  -- fastapi, uvicorn, sqlmodel, pillow, python-multipart, slowapi, pytest, httpx
   app/
     __init__.py
-    config.py                       -- Settings: DB path, media dir, CORS origins, max file size
-    database.py                     -- Engine creation, get_session, create_db_and_tables, SessionDep
-    utils.py                        -- Shared utilities: utcnow(), sanitize_csv_cell()
+    config.py                       -- Settings: DB path, media dir, CORS origins, max file size, rate limit
+    database.py                     -- Engine, get_session, create_db_and_tables, SessionDep, PRAGMA event listener
+    utils.py                        -- utcnow(), sanitize_csv_cell(), validate_source_url()
+    limiter.py                      -- slowapi Limiter instance (avoids circular import)
     models/
-      __init__.py                   -- Re-exports all models
-      test.py                       -- Test SQLModel (table=True)
-      screen_question.py            -- ScreenQuestion SQLModel (table=True)
-      option.py                     -- Option SQLModel (table=True)
-      response.py                   -- Response SQLModel (table=True)
+      __init__.py                   -- Re-exports all 4 models
+      test.py                       -- Test SQLModel
+      screen_question.py            -- ScreenQuestion SQLModel
+      option.py                     -- Option SQLModel
+      response.py                   -- Response SQLModel
     schemas/
       __init__.py                   -- Re-exports all schemas
-      test.py                       -- TestCreate, TestUpdate, TestPublic, TestListItem, TestDetail
+      test.py                       -- TestCreate, TestUpdate, TestPublic, TestListItem, TestDetail, RespondentTest
       screen_question.py            -- QuestionCreate, QuestionUpdate, QuestionPublic
-      option.py                     -- OptionPublic (includes source_type, source_url)
-      response.py                   -- AnswerCreate, AnalyticsResponse, QuestionAnalytics, OptionAnalytics
+      option.py                     -- OptionPublic
+      response.py                   -- AnswerCreate, AnalyticsResponse, QuestionAnalytics, OptionAnalytics, FollowUpEntry
     routes/
-      __init__.py                   -- Router aggregation
-      tests.py                      -- Test CRUD endpoints (with shared _build_test_with_questions helper)
-      questions.py                  -- Question CRUD endpoints
-      options.py                    -- Option CRUD endpoints (with source_type support)
-      respond.py                    -- Respondent-facing: get test by slug, submit answer (rate limited)
-      analytics.py                  -- Analytics + CSV export endpoints
+      __init__.py
+      tests.py                      -- Test CRUD + _build_test_with_questions helper (batch-fetch, no N+1)
+      questions.py                  -- Question CRUD + _require_draft helper
+      options.py                    -- Option CRUD with multipart/form-data + source_type + URL validation
+      respond.py                    -- Respondent: get test by slug, submit answer (rate limited)
+      analytics.py                  -- Analytics + CSV export
     services/
       __init__.py
-      image_service.py              -- save_image(), delete_image(), validate_image() (with streaming, Image.verify, GIF handling)
-      analytics_service.py          -- compute_analytics(), compute_csv() (batch-fetch, no N+1)
-  data/                             -- SQLite DB file (app.db), gitignored
-  media/                            -- Uploaded images, gitignored
+      image_service.py              -- save_image, delete_image, validate_image, delete_test_media (with decompression bomb guard)
+      analytics_service.py          -- compute_analytics, generate_csv (batch-fetch, no N+1)
+  data/                             -- SQLite DB (gitignored)
+  media/                            -- Uploaded images (gitignored)
   tests/
-    conftest.py                     -- Test DB fixture (in-memory SQLite, get_session override)
+    __init__.py
+    conftest.py                     -- In-memory SQLite fixture with StaticPool, TestClient, media isolation
     test_workflow.py                -- Full workflow integration test
+    test_upload.py                  -- Upload, URL validation, file cleanup tests
 ```
 
-### Frontend
+### Frontend (`frontend/`)
 
 ```
 frontend/
@@ -891,14 +207,14 @@ frontend/
   tailwind.config.ts
   next.config.ts
   app/
-    layout.tsx                      -- Root layout: html, body, Tailwind globals (NO Navbar)
-    globals.css                     -- Tailwind @tailwind directives
+    layout.tsx                      -- Root layout: html, body, Tailwind (NO Navbar)
+    globals.css                     -- Tailwind directives
     (designer)/
       layout.tsx                    -- Designer layout: Navbar + main container
       page.tsx                      -- Dashboard: list tests (Client Component)
       tests/
         new/
-          page.tsx                  -- Test builder (create new)
+          page.tsx                  -- Create new test
         [testId]/
           page.tsx                  -- Test detail/edit
           analytics/
@@ -909,58 +225,202 @@ frontend/
         page.tsx                    -- Respondent flow
   components/
     layout/
-      Navbar.tsx
+      Navbar.tsx                    -- Top nav bar
     test-builder/
-      TestMetaForm.tsx
-      QuestionEditor.tsx
-      OptionEditor.tsx              -- Includes source_type radio toggle
-      ImageUploader.tsx
+      TestMetaForm.tsx              -- Name + description fields
+      QuestionEditor.tsx            -- Question editing with options list
+      OptionEditor.tsx              -- Source type toggle, image upload or URL
+      ImageUploader.tsx             -- Drag-and-drop file input with preview
     respondent/
-      IntroScreen.tsx
-      QuestionView.tsx
-      OptionCard.tsx                -- Handles both upload (image) and URL (iframe) options
-      FollowUpInput.tsx
-      ProgressBar.tsx
+      IntroScreen.tsx               -- Test intro with Start button
+      QuestionView.tsx              -- One question with option cards (Fisher-Yates shuffle)
+      OptionCard.tsx                -- Image/iframe display, click-to-select, lock-in
+      FollowUpInput.tsx             -- Textarea with character counter
+      ProgressBar.tsx               -- "Question 2 of 5" bar
     analytics/
-      SummaryStats.tsx              -- Includes completion rate
-      VoteChart.tsx
-      FollowUpList.tsx
-      ExportButton.tsx
+      SummaryStats.tsx              -- Respondents, answers, completed, completion rate
+      VoteChart.tsx                 -- Bar/pie toggle with Recharts
+      FollowUpList.tsx              -- Follow-up texts grouped by option
+      ExportButton.tsx              -- CSV download trigger
     shared/
-      Button.tsx
-      Card.tsx
-      EmptyState.tsx
-      StatusBadge.tsx
-      ConfirmDialog.tsx             -- With Escape key, aria-modal, autoFocus
+      Button.tsx                    -- Styled button (primary/secondary/danger) with forwardRef
+      Card.tsx                      -- Card wrapper
+      EmptyState.tsx                -- "No data yet" placeholder
+      StatusBadge.tsx               -- Colored badge for draft/active/closed
+      ConfirmDialog.tsx             -- Modal with Escape key, aria-modal, autoFocus
   lib/
-    api.ts                          -- All API fetch functions
-    types.ts                        -- TypeScript interfaces (includes source_type, source_url, completion_rate)
-    constants.ts                    -- API_BASE_URL (single source of truth)
+    api.ts                          -- All fetch functions (typed)
+    types.ts                        -- TypeScript interfaces matching API schemas
+    constants.ts                    -- API_BASE_URL single source of truth
 ```
 
 ---
 
-## 9. Implementation Tasks
+## Tech-Specific Notes and Gotchas
 
-The tasks below are ordered for a clean build sequence where each layer builds on the previous.
+### FastAPI + SQLModel
 
-### Phase 1: Backend Foundation
+1. **`check_same_thread=False` is required** for SQLite with FastAPI. SQLite by default only allows the thread that created it to use it. FastAPI processes requests across threads, so this flag must be set on `create_engine`.
+
+2. **`SessionDep = Annotated[Session, Depends(get_session)]`** is the modern FastAPI pattern for dependency injection. Use this in all route function signatures instead of `session: Session = Depends(get_session)`.
+
+3. **Lifespan events replace `@app.on_event("startup")`** which is deprecated. Use `@asynccontextmanager async def lifespan(app)` and pass to `FastAPI(lifespan=lifespan)`.
+
+4. **When mixing `File()` and `Form()` parameters**, the request is `multipart/form-data`. You CANNOT also accept a JSON body in the same endpoint. This is an HTTP protocol limitation, not a FastAPI one.
+
+5. **`UploadFile.read(size)`** is an async method. In async route handlers, use `await file.read(size)`. In sync handlers, use `file.file.read(size)`. Since our option routes are `async def`, always use `await`.
+
+6. **SQLModel `cascade_delete=True`** on Relationship fields enables Python-side cascade. But SQLite also needs `PRAGMA foreign_keys=ON` at connection time for DB-level `ON DELETE CASCADE` to work. Both are needed.
+
+7. **`model_dump(exclude_unset=True)`** is the Pydantic v2 replacement for `.dict(exclude_unset=True)`. Use this for PATCH endpoints to only update fields the client actually sent.
+
+8. **Rate limiting with slowapi:** The limiter instance must be stored on `app.state.limiter` AND `SlowAPIMiddleware` must be added. The `@limiter.limit()` decorator requires a `request: Request` parameter in the route function signature.
+
+9. **PRAGMA execution via event listener:** `PRAGMA foreign_keys=ON` and `journal_mode=WAL` are executed on every new database connection via a SQLAlchemy `connect` event listener in `database.py`. This ensures every connection from the pool has the correct settings, unlike the one-time lifespan approach which only applies to a single connection.
+
+10. **Deviation from approved plan:** The limiter is defined in `app/limiter.py` instead of `main.py` to prevent circular imports. All code that needs the limiter imports from `app.limiter`, never from `main`.
+
+11. **SQLModel auto-generated table names** use the lowercased class name without underscores. `ScreenQuestion` becomes `screenquestion` (not `screen_question`). Foreign key references must use `screenquestion.id`.
+
+### Next.js App Router
+
+1. **`'use client'` directive** must be the very first line of the file (before any imports). Every page that uses `useState`, `useEffect`, `useParams`, or browser APIs needs this directive.
+
+2. **Route groups `(designer)`** use parentheses in the folder name. They affect layout nesting but do NOT appear in the URL. So `app/(designer)/page.tsx` serves `/`, not `/(designer)/`.
+
+3. **`useParams()` returns `Record<string, string | string[]>`** in the App Router. Always cast: `const testId = Number(params.testId)`. The hook is imported from `next/navigation`, NOT `next/router`. **Important:** `useParams()` can return `null` during prerendering. Always add a null guard: `const params = useParams(); if (!params?.testId) return <Loading />;`
+
+4. **All navigation hooks** (`useRouter`, `usePathname`, `useSearchParams`, `useParams`) come from `next/navigation` in the App Router, not from `next/router` (which is Pages Router only).
+
+5. **Do NOT set `Content-Type` header for `FormData` requests.** The browser automatically sets it with the correct multipart boundary. Manually setting it breaks the upload.
+
+6. **`crypto.randomUUID()`** is available in modern browsers and generates a UUID v4. No polyfill needed for our target environment.
+
+7. **`Inter` font from `next/font/google`** is the default font. Apply its `className` to the `<body>` tag in the root layout.
+
+8. **Dynamic route folders** use square brackets: `[testId]`, `[slug]`. The parameter name inside the brackets matches what `useParams()` returns.
+
+### Recharts
+
+1. **`ResponsiveContainer` requires a parent with defined dimensions.** It will NOT render if the parent has no width/height. Always wrap charts in a container with explicit height (e.g., `height={300}`).
+
+2. **Recharts is a client-side library.** All chart components must be inside a `'use client'` component. Recharts uses browser DOM APIs and will fail during SSR.
+
+3. **Tooltip `formatter` callback signature** is `(value, name, props)` where `props.payload` contains the full data item. Use `props.payload.percentage` to access custom fields, NOT `data.find()` which breaks on ties.
+
+4. **Pie chart `label` prop** can be a function receiving entry data. Use it to show `${name}: ${percentage}%` on pie slices.
+
+5. **`Cell` components** are used inside `Bar` or `Pie` to assign individual colors to each data point. Map over data with index to assign from a color array.
+
+6. **Install Recharts:** `npm install recharts`. No additional type packages needed (types are bundled).
 
 ---
 
-### Task 1: Project scaffolding and dependencies
+## Security Considerations
+
+1. **URL validation:** Server-side `validate_source_url()` rejects non-http/https schemes (`javascript:`, `data:`, `file:`, etc.) to prevent XSS via URL options.
+2. **Image decompression bomb guard:** After `Image.verify()` passes, a max pixel count check (25 megapixels) prevents small compressed files from triggering massive memory allocation during thumbnail generation.
+3. **CSV injection protection:** All string cells in CSV exports are sanitized -- cells starting with `=`, `+`, `-`, `@` are prefixed with a single quote.
+4. **UUID filenames:** Uploaded images use UUID-based filenames to prevent path traversal attacks.
+5. **Rate limiting:** Per-IP rate limit on the respondent answer endpoint prevents submission flooding.
+6. **`rel="noopener noreferrer"`:** All links that open in a new tab use this attribute to prevent reverse tabnapping.
+7. **`Image.verify()`:** Validates uploaded files are actual images, not spoofed files with image MIME types.
+
+---
+
+## Tasks
+
+---
+
+### Task 1: Git Init and Root Project Files
 
 **Files:**
-- Create: `backend/main.py`
+- Create: `.gitignore`
+
+**What:** Initialize git repository if not already done, create root `.gitignore` to exclude build artifacts, dependencies, and data directories.
+
+**Dependencies:** None (first task)
+
+**Complexity:** S
+
+- [ ] **Step 1: Initialize git if not already done**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git init
+```
+
+If git is already initialized, this is a no-op.
+
+- [ ] **Step 2: Create root .gitignore**
+
+```gitignore
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/**/*.pyc
+backend/data/
+backend/media/
+backend/.pytest_cache/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add .gitignore
+git commit -m "chore: add root .gitignore for backend/frontend build artifacts"
+```
+
+**Acceptance Criteria:**
+- `.gitignore` exists at project root
+- Covers `venv/`, `node_modules/`, `.next/`, `data/`, `media/`, `__pycache__/`
+
+**Test Strategy:** Visual inspection of `.gitignore` contents.
+
+---
+
+### Task 2: Backend Scaffolding -- Directory Structure, Config, Database, Main
+
+**Files:**
 - Create: `backend/requirements.txt`
 - Create: `backend/app/__init__.py`
 - Create: `backend/app/config.py`
 - Create: `backend/app/database.py`
 - Create: `backend/app/utils.py`
+- Create: `backend/app/limiter.py`
+- Create: `backend/main.py` (minimal -- no routers yet)
+- Create: `backend/app/models/__init__.py`
+- Create: `backend/app/schemas/__init__.py`
+- Create: `backend/app/routes/__init__.py`
+- Create: `backend/app/services/__init__.py`
+- Create: `backend/tests/__init__.py`
 
-- [ ] **Step 1: Create backend directory structure**
+**What:** Create the full backend directory tree, install Python dependencies, write config/database/utils modules, and create a minimal `main.py` that starts FastAPI with CORS, static files, lifespan, and rate limiter. The database module uses a SQLAlchemy `connect` event listener to ensure `PRAGMA foreign_keys=ON` and `journal_mode=WAL` run on every new connection. Verify the server starts and Swagger UI is accessible.
+
+**Dependencies:** Task 1
+
+**Complexity:** M
+
+- [ ] **Step 1: Create directory structure**
 
 ```bash
+cd /Users/bharath/Documents/abtestingapp
 mkdir -p backend/app/models backend/app/schemas backend/app/routes backend/app/services backend/data backend/media backend/tests
 touch backend/app/__init__.py backend/app/models/__init__.py backend/app/schemas/__init__.py backend/app/routes/__init__.py backend/app/services/__init__.py backend/tests/__init__.py
 ```
@@ -974,13 +434,17 @@ sqlmodel==0.0.22
 pillow==11.1.0
 python-multipart==0.0.20
 slowapi==0.1.9
+pytest==8.3.4
+httpx==0.28.1
 ```
 
 - [ ] **Step 3: Create virtual environment and install dependencies**
 
 ```bash
-cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+cd /Users/bharath/Documents/abtestingapp/backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 ```
+
+Expected: All packages install successfully. Verify with `pip list | grep fastapi`.
 
 - [ ] **Step 4: Write config.py**
 
@@ -995,6 +459,7 @@ DATABASE_URL = f"sqlite:///{DATA_DIR / 'app.db'}"
 
 CORS_ORIGINS = ["http://localhost:3000"]
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+MAX_IMAGE_PIXELS = 25_000_000  # 25 megapixels -- decompression bomb guard
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 THUMBNAIL_MAX_WIDTH = 800
 
@@ -1002,11 +467,13 @@ THUMBNAIL_MAX_WIDTH = 800
 RATE_LIMIT_RESPONDENT = "30/minute"
 ```
 
-- [ ] **Step 5: Write utils.py (shared utilities)**
+- [ ] **Step 5: Write utils.py**
 
 ```python
 # backend/app/utils.py
 from datetime import datetime, timezone
+from urllib.parse import urlparse
+from fastapi import HTTPException
 
 
 def utcnow() -> datetime:
@@ -1023,21 +490,51 @@ def sanitize_csv_cell(value: str) -> str:
     if value and value[0] in ("=", "+", "-", "@"):
         return f"'{value}"
     return value
+
+
+def validate_source_url(url: str) -> str:
+    """Validate that a source URL uses http or https scheme.
+
+    Rejects javascript:, data:, file:, and other non-http schemes to prevent
+    XSS and local file access attacks.
+    """
+    url = url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="source_url cannot be empty.")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed.",
+        )
+    return url
 ```
 
-- [ ] **Step 6: Write database.py**
+- [ ] **Step 6: Write database.py (with connect event listener for PRAGMAs)**
 
 ```python
 # backend/app/database.py
 from typing import Annotated
 from fastapi import Depends
-from sqlmodel import Session, SQLModel, create_engine
+from sqlalchemy import event
+from sqlmodel import Session, SQLModel, create_engine, text
 from app.config import DATABASE_URL, DATA_DIR
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 connect_args = {"check_same_thread": False}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
+
+
+# Ensure PRAGMA foreign_keys=ON and journal_mode=WAL on EVERY new connection.
+# This is critical because SQLAlchemy's connection pool may create multiple
+# connections, and PRAGMAs set on one connection do not propagate to others.
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 
 def create_db_and_tables():
@@ -1052,7 +549,19 @@ def get_session():
 SessionDep = Annotated[Session, Depends(get_session)]
 ```
 
-- [ ] **Step 7: Write main.py with lifespan, CORS, static files, and rate limiter**
+- [ ] **Step 7: Write limiter.py (shared module to avoid circular imports)**
+
+**Deviation from approved plan:** The limiter is defined here in `app/limiter.py` instead of directly in `main.py`. This prevents circular imports when `respond.py` needs to import the limiter. All code that needs the limiter imports `from app.limiter import limiter`.
+
+```python
+# backend/app/limiter.py
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+```
+
+- [ ] **Step 8: Write main.py (minimal -- no routers yet, PRAGMAs handled by event listener)**
 
 ```python
 # backend/main.py
@@ -1060,27 +569,18 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from app.config import CORS_ORIGINS, MEDIA_DIR
 from app.database import create_db_and_tables
-
-# Rate limiter (per-IP)
-limiter = Limiter(key_func=get_remote_address)
+from app.limiter import limiter
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # PRAGMAs (foreign_keys=ON, journal_mode=WAL) are handled by the
+    # SQLAlchemy connect event listener in database.py, so they apply
+    # to every new connection automatically.
     create_db_and_tables()
-    # Enable WAL mode and foreign key enforcement for SQLite
-    from app.database import engine
-    from sqlmodel import text
-    with engine.connect() as conn:
-        conn.execute(text("PRAGMA journal_mode=WAL"))
-        conn.execute(text("PRAGMA foreign_keys=ON"))
-        conn.commit()
     yield
 
 
@@ -1091,6 +591,7 @@ app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
@@ -1099,24 +600,35 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 ```
 
-- [ ] **Step 8: Verify the server starts**
+- [ ] **Step 9: Verify the server starts**
 
 ```bash
-cd backend && source venv/bin/activate && uvicorn main:app --reload --port 8000
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && timeout 5 uvicorn main:app --port 8000 || true
 ```
 
-Expected: Server starts, `http://localhost:8000/docs` shows Swagger UI with no endpoints yet.
+Expected: Server starts without import errors. `http://localhost:8000/docs` would show Swagger UI with no endpoints.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add backend/
-git commit -m "feat: scaffold backend with FastAPI, SQLModel, CORS, rate limiter, and static files"
+cd /Users/bharath/Documents/abtestingapp && git add backend/
+git commit -m "feat: scaffold backend with FastAPI, SQLModel, CORS, rate limiter, PRAGMA event listener, and URL validation"
 ```
+
+**Acceptance Criteria:**
+- `uvicorn main:app` starts without errors
+- `/docs` shows empty Swagger UI
+- `backend/data/` directory is created on startup
+- `backend/media/` directory is created on startup
+- `database.py` contains a `connect` event listener that runs `PRAGMA foreign_keys=ON` and `PRAGMA journal_mode=WAL` on every new connection
+- `utils.py` contains `validate_source_url()` that rejects non-http/https schemes
+- `config.py` contains `MAX_IMAGE_PIXELS = 25_000_000`
+
+**Test Strategy:** Start the server and verify no import/startup errors.
 
 ---
 
-### Task 2: Database models
+### Task 3: Database Models (Test, ScreenQuestion, Option, Response)
 
 **Files:**
 - Create: `backend/app/models/test.py`
@@ -1124,6 +636,12 @@ git commit -m "feat: scaffold backend with FastAPI, SQLModel, CORS, rate limiter
 - Create: `backend/app/models/option.py`
 - Create: `backend/app/models/response.py`
 - Modify: `backend/app/models/__init__.py`
+
+**What:** Define all four SQLModel table models with proper fields, foreign keys, relationships, cascade rules, and indexes. Verify tables are created in SQLite.
+
+**Dependencies:** Task 2
+
+**Complexity:** M
 
 - [ ] **Step 1: Write Test model**
 
@@ -1271,7 +789,7 @@ __all__ = ["Test", "ScreenQuestion", "Option", "Response"]
 - [ ] **Step 6: Verify tables are created**
 
 ```bash
-cd backend && source venv/bin/activate && python -c "
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && python -c "
 from app.models import Test, ScreenQuestion, Option, Response
 from app.database import create_db_and_tables, engine
 create_db_and_tables()
@@ -1279,63 +797,62 @@ print('Tables created successfully')
 import sqlite3
 conn = sqlite3.connect('data/app.db')
 tables = conn.execute(\"SELECT name FROM sqlite_master WHERE type='table'\").fetchall()
-print('Tables:', [t[0] for t in tables])
+print('Tables:', sorted([t[0] for t in tables]))
 conn.close()
 "
 ```
 
-Expected: `Tables: ['test', 'screenquestion', 'option', 'response']`
+Expected: `Tables: ['option', 'response', 'screenquestion', 'test']`
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/models/ backend/app/utils.py
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/models/
 git commit -m "feat: add SQLModel database models for Test, ScreenQuestion, Option, Response"
 ```
 
+**Acceptance Criteria:**
+- All four tables created in SQLite
+- Foreign keys defined with correct references (`test.id`, `screenquestion.id`, `option.id`)
+- Unique constraint on `(session_id, screen_question_id)` in Response
+- All relationships defined with `cascade_delete=True`
+- `utcnow` used for all timestamp defaults (from `app.utils`)
+
+**Test Strategy:** Run the verification script and confirm table names appear.
+
 ---
 
-### Task 3: Pydantic schemas
+### Task 4: Pydantic Schemas (Request/Response Validation)
 
 **Files:**
-- Create: `backend/app/schemas/test.py`
-- Create: `backend/app/schemas/screen_question.py`
 - Create: `backend/app/schemas/option.py`
+- Create: `backend/app/schemas/screen_question.py`
+- Create: `backend/app/schemas/test.py`
 - Create: `backend/app/schemas/response.py`
 - Modify: `backend/app/schemas/__init__.py`
 
-- [ ] **Step 1: Write test schemas**
+**What:** Define all Pydantic v2 schemas for API request validation and response serialization. Schemas are separate from SQLModel table models to control exactly what is exposed via the API.
+
+**Dependencies:** Task 3
+
+**Complexity:** S
+
+- [ ] **Step 1: Write option schemas (must be defined first -- QuestionPublic depends on it)**
 
 ```python
-# backend/app/schemas/test.py
+# backend/app/schemas/option.py
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-class TestCreate(BaseModel):
-    name: str = Field(max_length=200)
-    description: str | None = Field(default=None, max_length=2000)
-
-
-class TestUpdate(BaseModel):
-    name: str | None = Field(default=None, max_length=200)
-    description: str | None = Field(default=None, max_length=2000)
-    status: str | None = Field(default=None, pattern="^(draft|active|closed)$")
-
-
-class TestPublic(BaseModel):
+class OptionPublic(BaseModel):
     id: int
-    slug: str
-    name: str
-    description: str | None
-    status: str
+    label: str
+    source_type: str  # "upload" or "url"
+    image_url: str | None = None
+    source_url: str | None = None
+    order: int
     created_at: datetime
-    updated_at: datetime
-
-
-class TestListItem(TestPublic):
-    question_count: int = 0
-    response_count: int = 0
 ```
 
 - [ ] **Step 2: Write screen question schemas**
@@ -1371,22 +888,50 @@ class QuestionPublic(BaseModel):
     options: list[OptionPublic] = []
 ```
 
-- [ ] **Step 3: Write option schemas**
+- [ ] **Step 3: Write test schemas**
 
 ```python
-# backend/app/schemas/option.py
+# backend/app/schemas/test.py
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from app.schemas.screen_question import QuestionPublic
 
 
-class OptionPublic(BaseModel):
+class TestCreate(BaseModel):
+    name: str = Field(max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class TestUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    status: str | None = Field(default=None, pattern="^(draft|active|closed)$")
+
+
+class TestPublic(BaseModel):
     id: int
-    label: str
-    source_type: str  # "upload" or "url"
-    image_url: str | None = None
-    source_url: str | None = None
-    order: int
+    slug: str
+    name: str
+    description: str | None
+    status: str
     created_at: datetime
+    updated_at: datetime
+
+
+class TestListItem(TestPublic):
+    question_count: int = 0
+    response_count: int = 0
+
+
+class TestDetail(TestPublic):
+    questions: list[QuestionPublic] = []
+
+
+class RespondentTest(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    questions: list[QuestionPublic] = []
 ```
 
 - [ ] **Step 4: Write response/analytics schemas**
@@ -1438,27 +983,7 @@ class AnalyticsResponse(BaseModel):
     questions: list[QuestionAnalytics]
 ```
 
-- [ ] **Step 5: Write test detail schema (depends on QuestionPublic)**
-
-Add to `backend/app/schemas/test.py`:
-
-```python
-# Append to the end of backend/app/schemas/test.py
-from app.schemas.screen_question import QuestionPublic
-
-
-class TestDetail(TestPublic):
-    questions: list[QuestionPublic] = []
-
-
-class RespondentTest(BaseModel):
-    id: int
-    name: str
-    description: str | None
-    questions: list[QuestionPublic] = []
-```
-
-- [ ] **Step 6: Update schemas __init__.py**
+- [ ] **Step 5: Update schemas __init__.py**
 
 ```python
 # backend/app/schemas/__init__.py
@@ -1468,21 +993,49 @@ from app.schemas.test import TestCreate, TestUpdate, TestPublic, TestListItem, T
 from app.schemas.response import AnswerCreate, AnalyticsResponse, QuestionAnalytics, OptionAnalytics, FollowUpEntry
 ```
 
+- [ ] **Step 6: Verify imports**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && python -c "
+from app.schemas import TestCreate, TestUpdate, TestPublic, TestListItem, TestDetail, RespondentTest
+from app.schemas import QuestionCreate, QuestionUpdate, QuestionPublic
+from app.schemas import OptionPublic
+from app.schemas import AnswerCreate, AnalyticsResponse, QuestionAnalytics, OptionAnalytics, FollowUpEntry
+print('All schemas imported successfully')
+"
+```
+
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/schemas/
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/schemas/
 git commit -m "feat: add Pydantic schemas for API request/response validation"
 ```
 
+**Acceptance Criteria:**
+- All schemas importable without errors
+- `TestUpdate.status` has regex pattern validation for `draft|active|closed`
+- `AnswerCreate.followup_text` max length is 500
+- `OptionPublic` includes `source_type`, `image_url`, `source_url`
+- `AnalyticsResponse` includes `completed_sessions` and `completion_rate`
+
+**Test Strategy:** Import all schemas and verify no errors.
+
 ---
 
-### Task 4: Image service
+### Task 5: Image Service + Complete main.py with All Router Stubs
 
 **Files:**
 - Create: `backend/app/services/image_service.py`
+- Modify: `backend/main.py` (replace with complete version including all router imports)
 
-- [ ] **Step 1: Write image service**
+**What:** Implement image upload with bounded reads (memory bomb prevention), `Image.verify()` validation, decompression bomb guard (25MP max), UUID-based filenames, thumbnail generation (skip for GIFs), and cleanup functions. Then update main.py to include ALL five router imports so that Tasks 6-9 do NOT need to modify main.py (preventing concurrent modification conflicts).
+
+**Dependencies:** Task 4
+
+**Complexity:** M
+
+- [ ] **Step 1: Write image_service.py**
 
 ```python
 # backend/app/services/image_service.py
@@ -1491,7 +1044,7 @@ import uuid
 from pathlib import Path
 from fastapi import HTTPException, UploadFile
 from PIL import Image
-from app.config import ALLOWED_IMAGE_TYPES, MAX_IMAGE_SIZE_BYTES, MEDIA_DIR, THUMBNAIL_MAX_WIDTH
+from app.config import ALLOWED_IMAGE_TYPES, MAX_IMAGE_SIZE_BYTES, MAX_IMAGE_PIXELS, MEDIA_DIR, THUMBNAIL_MAX_WIDTH
 
 
 def validate_image(file: UploadFile) -> None:
@@ -1507,13 +1060,13 @@ async def save_image(file: UploadFile, test_id: int) -> tuple[str, str]:
     """Save uploaded image and generate thumbnail. Returns (uuid_filename, original_filename).
 
     Reads file in a bounded manner to prevent memory bombs, then validates
-    with Image.verify() to reject spoofed non-image files. Skips thumbnail
-    generation for GIFs to preserve animation.
+    with Image.verify() to reject spoofed non-image files. Checks pixel count
+    to prevent decompression bombs. Skips thumbnail generation for GIFs to
+    preserve animation.
     """
     validate_image(file)
 
     # Read file content with bounded read to prevent memory bomb.
-    # Read at most MAX_IMAGE_SIZE_BYTES + 1 bytes; if we got more, it's too large.
     content = await file.read(MAX_IMAGE_SIZE_BYTES + 1)
     if len(content) > MAX_IMAGE_SIZE_BYTES:
         raise HTTPException(
@@ -1545,6 +1098,25 @@ async def save_image(file: UploadFile, test_id: int) -> tuple[str, str]:
         raise HTTPException(
             status_code=400,
             detail="File is not a valid image.",
+        )
+
+    # Decompression bomb guard: check pixel count after verify passes
+    try:
+        with Image.open(original_path) as img:
+            width, height = img.size
+            if width * height > MAX_IMAGE_PIXELS:
+                original_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Image dimensions too large ({width}x{height}). Maximum is {MAX_IMAGE_PIXELS} pixels.",
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        original_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to read image dimensions.",
         )
 
     # Generate thumbnail (skip for GIFs to preserve animation)
@@ -1597,37 +1169,147 @@ def get_thumbnail_url(test_id: int, filename: str | None) -> str | None:
     """Construct the URL path for a thumbnail. For GIFs, returns the original URL."""
     if not filename:
         return None
-    # GIFs don't have thumbnails; serve original
     if filename.lower().endswith(".gif"):
         return f"/media/{test_id}/{filename}"
     return f"/media/{test_id}/thumb_{filename}"
 ```
 
-- [ ] **Step 2: Verify imports work**
+- [ ] **Step 2: Write the COMPLETE main.py with all router imports**
 
-```bash
-cd backend && source venv/bin/activate && python -c "from app.services.image_service import save_image, delete_image, get_image_url; print('Image service OK')"
+This is the final main.py that includes all five routers. By writing it now (in Task 5), Tasks 6-9 do NOT need to modify main.py, preventing merge conflicts when those tasks run in parallel.
+
+**Note:** The route files (`tests.py`, `questions.py`, `options.py`, `respond.py`, `analytics.py`) do not exist yet. This main.py will fail to import until those files are created in Tasks 6-10. That is expected -- this task creates the complete main.py so that it does not need to be modified again.
+
+```python
+# backend/main.py
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from slowapi.middleware import SlowAPIMiddleware
+from app.config import CORS_ORIGINS, MEDIA_DIR
+from app.database import create_db_and_tables
+from app.limiter import limiter
+from app.models import Test, ScreenQuestion, Option, Response  # noqa: F401 -- ensure models registered
+from app.routes.tests import router as tests_router
+from app.routes.questions import router as questions_router
+from app.routes.options import router as options_router
+from app.routes.respond import router as respond_router
+from app.routes.analytics import router as analytics_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # PRAGMAs (foreign_keys=ON, journal_mode=WAL) are handled by the
+    # SQLAlchemy connect event listener in database.py, so they apply
+    # to every new connection automatically.
+    create_db_and_tables()
+    yield
+
+
+app = FastAPI(title="DesignPoll API", version="0.1.0", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["*"],
+)
+
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+app.include_router(tests_router)
+app.include_router(questions_router)
+app.include_router(options_router)
+app.include_router(respond_router)
+app.include_router(analytics_router)
 ```
 
-- [ ] **Step 3: Commit**
+**IMPORTANT for the implementing agent:** After writing this main.py, also create empty placeholder route files so that the imports do not immediately fail. Create these five files with minimal router definitions:
+
+```python
+# backend/app/routes/tests.py (placeholder -- full implementation in Task 6)
+from fastapi import APIRouter
+router = APIRouter(prefix="/api/v1/tests", tags=["tests"])
+```
+
+```python
+# backend/app/routes/questions.py (placeholder -- full implementation in Task 7)
+from fastapi import APIRouter
+router = APIRouter(tags=["questions"])
+```
+
+```python
+# backend/app/routes/options.py (placeholder -- full implementation in Task 8)
+from fastapi import APIRouter
+router = APIRouter(tags=["options"])
+```
+
+```python
+# backend/app/routes/respond.py (placeholder -- full implementation in Task 9)
+from fastapi import APIRouter
+router = APIRouter(prefix="/api/v1/respond", tags=["respondent"])
+```
+
+```python
+# backend/app/routes/analytics.py (placeholder -- full implementation in Task 10)
+from fastapi import APIRouter
+router = APIRouter(prefix="/api/v1/tests", tags=["analytics"])
+```
+
+- [ ] **Step 3: Verify server starts with placeholders**
 
 ```bash
-git add backend/app/services/image_service.py
-git commit -m "feat: add image service with streaming upload, Image.verify, and GIF-safe thumbnails"
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && timeout 5 uvicorn main:app --port 8000 || true
 ```
+
+Expected: Server starts. Swagger UI shows no real endpoints (just placeholder routers).
+
+- [ ] **Step 4: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/services/image_service.py backend/main.py backend/app/routes/
+git commit -m "feat: add image service with decompression bomb guard, and complete main.py with all router stubs"
+```
+
+**Acceptance Criteria:**
+- `save_image()` reads at most `MAX_IMAGE_SIZE_BYTES + 1` bytes (never unbounded)
+- `Image.verify()` called after file is saved to disk
+- Decompression bomb guard: pixel count checked against `MAX_IMAGE_PIXELS` (25MP)
+- If `Image.verify()` or pixel check fails, the saved file is deleted before raising HTTPException
+- GIF files get no thumbnail; non-GIF files get a thumbnail at max 800px width
+- UUID-based filenames prevent path traversal
+- `delete_image()` removes both original and thumbnail
+- `delete_test_media()` removes entire `media/{test_id}/` directory
+- `main.py` includes all five router imports (with placeholder files)
+- Server starts successfully with placeholder routers
+
+**Test Strategy:** Import and verify no errors. Full testing happens in the integration test (Task 14).
 
 ---
 
-### Task 5: Test CRUD routes
+### Task 6: Test CRUD Routes
 
 **Files:**
-- Create: `backend/app/routes/tests.py`
-- Modify: `backend/main.py` (include router)
+- Create: `backend/app/routes/tests.py` (replace placeholder)
 
-- [ ] **Step 1: Write tests router**
+**What:** Implement POST/GET/GET/{id}/PATCH/DELETE for tests. Includes the shared `_build_test_with_questions()` helper that is reused by respond routes. **The helper uses batch-fetch: a single query loads all options for all questions, then groups them in Python (no N+1).** List endpoint uses JOINs + GROUP BY to avoid N+1 queries. PATCH enforces lifecycle transitions and activation validation (1+ questions, 2-5 options each). DELETE commits DB first, then removes media files.
+
+**Dependencies:** Task 5
+
+**Complexity:** L
+
+**IMPORTANT:** This task does NOT modify `main.py`. The router import is already in main.py from Task 5. This task only replaces the placeholder `tests.py` file.
+
+- [ ] **Step 1: Write tests.py route file (replacing placeholder)**
 
 ```python
 # backend/app/routes/tests.py
+from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from sqlmodel import col, func, select, distinct
@@ -1648,7 +1330,8 @@ def _build_test_with_questions(test: Test, session, schema_class=TestDetail):
     """Shared helper: load a test with its nested questions and options.
 
     Used by both get_test (designer) and get_test_for_respondent to avoid
-    duplicated query logic.
+    duplicated query logic. Uses batch-fetch for options (single query for
+    all questions) to avoid N+1 queries.
     """
     questions = session.exec(
         select(ScreenQuestion)
@@ -1656,13 +1339,25 @@ def _build_test_with_questions(test: Test, session, schema_class=TestDetail):
         .order_by(ScreenQuestion.order)
     ).all()
 
+    if not questions:
+        return []
+
+    # Batch-fetch ALL options for ALL questions in a single query
+    question_ids = [q.id for q in questions]
+    all_options = session.exec(
+        select(Option)
+        .where(Option.screen_question_id.in_(question_ids))
+        .order_by(Option.order)
+    ).all()
+
+    # Group options by question ID
+    options_by_question: dict[int, list[Option]] = defaultdict(list)
+    for o in all_options:
+        options_by_question[o.screen_question_id].append(o)
+
     question_list = []
     for q in questions:
-        options = session.exec(
-            select(Option)
-            .where(Option.screen_question_id == q.id)
-            .order_by(Option.order)
-        ).all()
+        q_options = options_by_question.get(q.id, [])
         option_list = [
             OptionPublic(
                 id=o.id,
@@ -1673,7 +1368,7 @@ def _build_test_with_questions(test: Test, session, schema_class=TestDetail):
                 order=o.order,
                 created_at=o.created_at,
             )
-            for o in options
+            for o in q_options
         ]
         question_list.append(
             QuestionPublic(
@@ -1833,45 +1528,48 @@ def delete_test(test_id: int, session: SessionDep):
     return None
 ```
 
-- [ ] **Step 2: Include tests router in main.py**
-
-Add to `backend/main.py` after the `app.mount(...)` line:
-
-```python
-from app.routes.tests import router as tests_router
-app.include_router(tests_router)
-```
-
-Also add the models import so tables are registered:
-
-```python
-from app.models import Test, ScreenQuestion, Option, Response  # noqa: F401
-```
-
-- [ ] **Step 3: Verify endpoints appear in Swagger**
+- [ ] **Step 2: Verify endpoints appear in Swagger**
 
 ```bash
-cd backend && source venv/bin/activate && uvicorn main:app --reload --port 8000
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && timeout 5 uvicorn main:app --port 8000 || true
 ```
 
-Visit `http://localhost:8000/docs`. Expected: Test CRUD endpoints visible.
+Expected: Server starts. Swagger UI at `/docs` shows test CRUD endpoints.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add backend/app/routes/tests.py backend/main.py
-git commit -m "feat: add Test CRUD API endpoints with lifecycle validation and N+1-free list"
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/routes/tests.py
+git commit -m "feat: add Test CRUD API endpoints with batch-fetch helper, lifecycle validation, and N+1-free list"
 ```
+
+**Acceptance Criteria:**
+- `POST /api/v1/tests` creates a test with auto-generated slug
+- `GET /api/v1/tests` returns list with `question_count` and `response_count` (single query)
+- `GET /api/v1/tests/{test_id}` returns nested questions and options
+- `_build_test_with_questions()` batch-fetches all options in ONE query (no N+1)
+- `PATCH /api/v1/tests/{test_id}` enforces: valid transitions only, activation requires 1+ questions with 2-5 options each, non-draft tests only allow name/description/status changes
+- `DELETE /api/v1/tests/{test_id}` commits DB delete first, then removes media directory
+- `_build_test_with_questions()` helper is importable by other route files
+
+**Test Strategy:** Tested in Task 14 integration test.
 
 ---
 
-### Task 6: Question CRUD routes
+### Task 7: Question CRUD Routes
 
 **Files:**
-- Create: `backend/app/routes/questions.py`
-- Modify: `backend/main.py` (include router)
+- Create: `backend/app/routes/questions.py` (replace placeholder)
 
-- [ ] **Step 1: Write questions router**
+**What:** Implement POST (under test), PATCH, DELETE for screen questions. All mutations require parent test to be in draft status. Delete cleans up option images before cascade. Auto-assigns order as max+1.
+
+**Dependencies:** Task 5
+
+**Complexity:** M
+
+**IMPORTANT:** This task does NOT modify `main.py`. The router import is already in main.py from Task 5.
+
+- [ ] **Step 1: Write questions.py route file (replacing placeholder)**
 
 ```python
 # backend/app/routes/questions.py
@@ -1993,31 +1691,37 @@ def delete_question(question_id: int, session: SessionDep):
     return None
 ```
 
-- [ ] **Step 2: Include questions router in main.py**
-
-Add to `backend/main.py`:
-
-```python
-from app.routes.questions import router as questions_router
-app.include_router(questions_router)
-```
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-git add backend/app/routes/questions.py backend/main.py
-git commit -m "feat: add ScreenQuestion CRUD API endpoints with orphan file cleanup"
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/routes/questions.py
+git commit -m "feat: add ScreenQuestion CRUD API endpoints with draft enforcement and orphan file cleanup"
 ```
+
+**Acceptance Criteria:**
+- Creating a question on a non-draft test returns 403
+- Order is auto-assigned as max existing order + 1
+- Deleting a question deletes associated image files from disk after DB commit
+- All three endpoints appear in Swagger
+
+**Test Strategy:** Tested in Task 14 integration test.
 
 ---
 
-### Task 7: Option CRUD routes (with image upload and URL support)
+### Task 8: Option CRUD Routes (Multipart Upload + URL Support)
 
 **Files:**
-- Create: `backend/app/routes/options.py`
-- Modify: `backend/main.py` (include router)
+- Create: `backend/app/routes/options.py` (replace placeholder)
 
-- [ ] **Step 1: Write options router**
+**What:** Implement POST (multipart), PATCH (multipart), DELETE for options. Supports `source_type` of `"upload"` or `"url"`. Handles source-type transitions (upload-to-url, url-to-upload). Enforces max 5 options per question. File replacement saves new file before deleting old. URL validation via `validate_source_url()`. All mutations require parent test to be in draft status.
+
+**Dependencies:** Task 5
+
+**Complexity:** L
+
+**IMPORTANT:** This task does NOT modify `main.py`. The router import is already in main.py from Task 5.
+
+- [ ] **Step 1: Write options.py route file (replacing placeholder)**
 
 ```python
 # backend/app/routes/options.py
@@ -2029,6 +1733,7 @@ from app.models.screen_question import ScreenQuestion
 from app.models.option import Option
 from app.schemas.option import OptionPublic
 from app.services.image_service import save_image, delete_image, get_image_url
+from app.utils import validate_source_url
 
 router = APIRouter(tags=["options"])
 
@@ -2097,7 +1802,7 @@ async def create_option(
     elif source_type == "url":
         if not source_url or not source_url.strip():
             raise HTTPException(status_code=400, detail="source_url is required for URL mode.")
-        option_source_url = source_url.strip()
+        option_source_url = validate_source_url(source_url)
 
     option = Option(
         screen_question_id=question_id,
@@ -2152,9 +1857,10 @@ async def update_option(
                 # Switching from upload to URL
                 if not source_url or not source_url.strip():
                     raise HTTPException(status_code=400, detail="source_url is required for URL mode.")
+                validated_url = validate_source_url(source_url)
                 old_image_filename = option.image_filename
                 option.source_type = "url"
-                option.source_url = source_url.strip()
+                option.source_url = validated_url
                 option.image_filename = None
                 option.original_filename = None
             elif source_type == "upload":
@@ -2167,7 +1873,7 @@ async def update_option(
         else:
             # Same source_type, update fields within the same mode
             if source_type == "url" and source_url is not None:
-                option.source_url = source_url.strip()
+                option.source_url = validate_source_url(source_url)
             if source_type == "upload" and image and image.filename:
                 # Save new image first, track old for deletion
                 old_image_filename = option.image_filename
@@ -2180,7 +1886,7 @@ async def update_option(
                 old_image_filename = option.image_filename
                 option.image_filename, option.original_filename = await save_image(image, question.test_id)
         if source_url is not None and option.source_type == "url":
-            option.source_url = source_url.strip()
+            option.source_url = validate_source_url(source_url)
 
     session.add(option)
     session.commit()
@@ -2213,31 +1919,40 @@ def delete_option(option_id: int, session: SessionDep):
     return None
 ```
 
-- [ ] **Step 2: Include options router in main.py**
-
-Add to `backend/main.py`:
-
-```python
-from app.routes.options import router as options_router
-app.include_router(options_router)
-```
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-git add backend/app/routes/options.py backend/main.py
-git commit -m "feat: add Option CRUD API with source_type support, image upload, URL mode, and safe file ordering"
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/routes/options.py
+git commit -m "feat: add Option CRUD API with source_type support, URL validation, image upload, and safe file ordering"
 ```
+
+**Acceptance Criteria:**
+- `POST` accepts multipart/form-data with `label`, `source_type`, `image`, `source_url`
+- Max 5 options enforced per question (returns 400 at 5)
+- `source_type="upload"` requires image file; `source_type="url"` requires source_url
+- URL options validated via `validate_source_url()` -- rejects non-http/https schemes
+- Source-type transitions clear stale data (switching upload->url clears image_filename; switching url->upload clears source_url)
+- Image replacement: new file saved first, old file deleted after DB commit
+- Empty label (after strip) returns 400
+
+**Test Strategy:** Tested in Task 14 integration test.
 
 ---
 
-### Task 8: Respondent-facing routes (with rate limiting)
+### Task 9: Respondent-Facing Routes (Get Test + Submit Answer with Rate Limiting)
 
 **Files:**
-- Create: `backend/app/routes/respond.py`
-- Modify: `backend/main.py` (include router)
+- Create: `backend/app/routes/respond.py` (replace placeholder)
 
-- [ ] **Step 1: Write respond router**
+**What:** Implement GET test by slug (respondent view, omits internal fields) and POST answer submission. Answer endpoint catches `IntegrityError` for duplicate detection (race-safe). Rate limited via slowapi decorator. Validates question belongs to test, option belongs to question, and followup requirement. Uses `_build_test_with_questions` from Task 6's `tests.py`.
+
+**Dependencies:** Task 5, Task 6 (imports `_build_test_with_questions` from `app.routes.tests`)
+
+**Complexity:** M
+
+**IMPORTANT:** This task does NOT modify `main.py`. The router import is already in main.py from Task 5. This task imports `_build_test_with_questions` from `app.routes.tests` (created in Task 6), so Task 6 must complete first. The limiter is imported from `app.limiter` (NOT from `main`).
+
+- [ ] **Step 1: Write respond.py route file (replacing placeholder)**
 
 ```python
 # backend/app/routes/respond.py
@@ -2250,11 +1965,9 @@ from app.models.screen_question import ScreenQuestion
 from app.models.option import Option
 from app.models.response import Response
 from app.schemas.test import RespondentTest
-from app.schemas.screen_question import QuestionPublic
-from app.schemas.option import OptionPublic
 from app.schemas.response import AnswerCreate
-from app.services.image_service import get_image_url
 from app.routes.tests import _build_test_with_questions
+from app.limiter import limiter
 from app.config import RATE_LIMIT_RESPONDENT
 
 router = APIRouter(prefix="/api/v1/respond", tags=["respondent"])
@@ -2280,14 +1993,14 @@ def get_test_for_respondent(slug: str, session: SessionDep):
 
 
 @router.post("/{slug}/answers", status_code=201)
+@limiter.limit(RATE_LIMIT_RESPONDENT)
 def submit_answer(slug: str, data: AnswerCreate, session: SessionDep, request: Request):
-    """Submit one answer. Rate limited per IP to prevent flooding."""
-    # Rate limiting is applied via slowapi decorator or middleware-level config.
-    # Import limiter from main module for decorator usage:
-    from main import limiter
-    # Note: In practice, use @limiter.limit(RATE_LIMIT_RESPONDENT) decorator on this function.
-    # The decorator approach requires the Request parameter which is already included.
+    """Submit one answer. Rate limited per IP to prevent flooding.
 
+    The @limiter.limit() decorator requires the `request: Request` parameter
+    to extract the client IP. The decorator must come AFTER @router.post()
+    in reading order (i.e., it is the inner decorator).
+    """
     test = session.exec(select(Test).where(Test.slug == slug)).first()
     if not test:
         raise HTTPException(status_code=404, detail="Test not found")
@@ -2325,34 +2038,41 @@ def submit_answer(slug: str, data: AnswerCreate, session: SessionDep, request: R
     return {"status": "saved"}
 ```
 
-Note: The `submit_answer` function should be decorated with `@limiter.limit(RATE_LIMIT_RESPONDENT)` in the actual implementation. The decorator requires the `request: Request` parameter to extract the client IP. The configuration value `RATE_LIMIT_RESPONDENT = "30/minute"` is defined in `app/config.py`.
-
-- [ ] **Step 2: Include respond router in main.py**
-
-Add to `backend/main.py`:
-
-```python
-from app.routes.respond import router as respond_router
-app.include_router(respond_router)
-```
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-git add backend/app/routes/respond.py backend/main.py
-git commit -m "feat: add respondent-facing endpoints with IntegrityError-based duplicate detection and rate limiting"
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/routes/respond.py
+git commit -m "feat: add respondent-facing endpoints with rate limiting and IntegrityError-based duplicate detection"
 ```
+
+**Acceptance Criteria:**
+- `GET /api/v1/respond/{slug}` returns 404 for unknown slug, 403 for non-active test
+- Response omits `status`, `slug`, `created_at`, `updated_at` (only returns respondent-needed fields)
+- `POST /api/v1/respond/{slug}/answers` validates question belongs to test, option belongs to question
+- Duplicate answer (same session_id + question_id) returns 409 via IntegrityError catch
+- Missing required followup_text returns 400
+- Rate limiting active on the answer endpoint (via `@limiter.limit()` decorator)
+- Limiter imported from `app.limiter` (NOT from `main`)
+
+**Test Strategy:** Tested in Task 14 integration test.
 
 ---
 
-### Task 9: Analytics and CSV export routes
+### Task 10: Analytics Service and Routes (Batch-Fetch, Completion Rate, CSV Export)
 
 **Files:**
 - Create: `backend/app/services/analytics_service.py`
-- Create: `backend/app/routes/analytics.py`
-- Modify: `backend/main.py` (include router)
+- Create: `backend/app/routes/analytics.py` (replace placeholder)
 
-- [ ] **Step 1: Write analytics service**
+**What:** Implement analytics computation with batch-fetch (no N+1), completion rate calculation, and CSV export with CSV-injection sanitization. Analytics endpoint returns per-question vote distribution with winner detection. CSV endpoint returns downloadable file. **Both `compute_analytics` and `generate_csv` use batch-fetch for all queries to avoid N+1.**
+
+**Dependencies:** Task 6, Task 7, Task 8, Task 9 (needs all routes to exist for a complete API)
+
+**Complexity:** L
+
+**IMPORTANT:** This task does NOT modify `main.py`. The router import is already in main.py from Task 5.
+
+- [ ] **Step 1: Write analytics_service.py**
 
 ```python
 # backend/app/services/analytics_service.py
@@ -2420,12 +2140,9 @@ def compute_analytics(test: Test, session: Session) -> AnalyticsResponse:
     # Compute completion rate: sessions that answered ALL questions
     num_questions = len(questions)
     if total_sessions > 0 and num_questions > 0:
-        # Count questions answered per session
         session_question_counts: dict[str, int] = defaultdict(int)
         for r in all_responses:
             session_question_counts[r.session_id] += 1
-        # Note: the unique constraint ensures max 1 response per (session, question),
-        # so counting responses per session equals counting questions answered.
         completed_sessions = sum(
             1 for count in session_question_counts.values()
             if count >= num_questions
@@ -2442,7 +2159,6 @@ def compute_analytics(test: Test, session: Session) -> AnalyticsResponse:
         q_options = options_by_question.get(q.id, [])
         total_votes = len(q_responses)
 
-        # Aggregate votes and followups per option
         votes_by_option: dict[int, int] = defaultdict(int)
         followups_by_option: dict[int, list[Response]] = defaultdict(list)
         for r in q_responses:
@@ -2495,10 +2211,12 @@ def compute_analytics(test: Test, session: Session) -> AnalyticsResponse:
 
 
 def generate_csv(test: Test, session: Session) -> str:
-    """Generate CSV export with sanitized cells and pre-fetched option lookup.
+    """Generate CSV export with sanitized cells and batch-fetched data.
 
     All string cells are sanitized for CSV injection (cells starting with
     =, +, -, @ are prefixed with a single quote).
+
+    Uses batch-fetch for both options and responses to avoid N+1 queries.
     """
     questions = session.exec(
         select(ScreenQuestion)
@@ -2508,21 +2226,34 @@ def generate_csv(test: Test, session: Session) -> str:
 
     question_ids = [q.id for q in questions]
 
-    # Pre-fetch all options into a lookup dictionary to avoid N+1
+    # Pre-fetch all options into a lookup dictionary (single query)
     all_options = session.exec(
         select(Option).where(Option.screen_question_id.in_(question_ids))
     ).all() if question_ids else []
     option_lookup = {o.id: o for o in all_options}
+
+    # Batch-fetch all responses for all questions (single query)
+    all_responses = session.exec(
+        select(Response)
+        .where(Response.screen_question_id.in_(question_ids))
+        .order_by(Response.created_at)
+    ).all() if question_ids else []
+
+    # Group responses by question
+    responses_by_question: dict[int, list[Response]] = defaultdict(list)
+    for r in all_responses:
+        responses_by_question[r.screen_question_id].append(r)
+
+    # Build question lookup for titles
+    question_lookup = {q.id: q for q in questions}
 
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["question_title", "option_label", "followup_text", "session_id", "responded_at"])
 
     for q in questions:
-        responses = session.exec(
-            select(Response).where(Response.screen_question_id == q.id).order_by(Response.created_at)
-        ).all()
-        for r in responses:
+        q_responses = responses_by_question.get(q.id, [])
+        for r in q_responses:
             option = option_lookup.get(r.option_id)
             writer.writerow([
                 sanitize_csv_cell(q.title),
@@ -2535,7 +2266,7 @@ def generate_csv(test: Test, session: Session) -> str:
     return output.getvalue()
 ```
 
-- [ ] **Step 2: Write analytics router**
+- [ ] **Step 2: Write analytics.py route file (replacing placeholder)**
 
 ```python
 # backend/app/routes/analytics.py
@@ -2574,257 +2305,184 @@ def export_csv(test_id: int, session: SessionDep):
     )
 ```
 
-- [ ] **Step 3: Include analytics router in main.py**
-
-Add to `backend/main.py`:
-
-```python
-from app.routes.analytics import router as analytics_router
-app.include_router(analytics_router)
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add backend/app/services/analytics_service.py backend/app/routes/analytics.py backend/main.py
-git commit -m "feat: add analytics with batch-fetch, completion rate, and CSV-injection-safe export"
-```
-
----
-
-### Task 10: Backend integration test -- full workflow (with test DB isolation)
-
-**Files:**
-- Create: `backend/tests/conftest.py`
-- Create: `backend/tests/test_workflow.py`
-
-- [ ] **Step 1: Write test conftest for DB isolation**
-
-```python
-# backend/tests/conftest.py
-"""Test configuration: use an in-memory SQLite database to isolate tests from production data."""
-import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, text
-from app.database import get_session
-
-# In-memory SQLite for test isolation
-TEST_DATABASE_URL = "sqlite://"
-test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-
-
-@pytest.fixture(name="session", autouse=True)
-def session_fixture():
-    """Create fresh tables for each test, yield session, then drop."""
-    SQLModel.metadata.create_all(test_engine)
-    with test_engine.connect() as conn:
-        conn.execute(text("PRAGMA foreign_keys=ON"))
-        conn.commit()
-    with Session(test_engine) as session:
-        yield session
-    SQLModel.metadata.drop_all(test_engine)
-
-
-@pytest.fixture(name="client")
-def client_fixture(session: Session):
-    """TestClient that uses the test database session."""
-    def get_session_override():
-        yield session
-
-    from main import app
-    app.dependency_overrides[get_session] = get_session_override
-    client = TestClient(app)
-    yield client
-    app.dependency_overrides.clear()
-```
-
-- [ ] **Step 2: Write integration test**
-
-```python
-# backend/tests/test_workflow.py
-"""Full workflow integration test: create test -> add questions -> add options -> activate -> respond -> analytics."""
-
-
-def test_full_workflow(client):
-    # 1. Create a test
-    res = client.post("/api/v1/tests", json={"name": "My Test", "description": "A test"})
-    assert res.status_code == 201
-    test = res.json()
-    test_id = test["id"]
-    slug = test["slug"]
-    assert test["status"] == "draft"
-
-    # 2. Add a question
-    res = client.post(
-        f"/api/v1/tests/{test_id}/questions",
-        json={"title": "Which design?", "followup_required": True},
-    )
-    assert res.status_code == 201
-    question = res.json()
-    question_id = question["id"]
-
-    # 3. Add options using source_type=url (no image files needed in test)
-    res = client.post(
-        f"/api/v1/questions/{question_id}/options",
-        data={"label": "Option A", "source_type": "url", "source_url": "https://example.com/a", "order": "0"},
-    )
-    assert res.status_code == 201
-    opt_a = res.json()
-    option_a_id = opt_a["id"]
-    assert opt_a["source_type"] == "url"
-    assert opt_a["source_url"] == "https://example.com/a"
-
-    res = client.post(
-        f"/api/v1/questions/{question_id}/options",
-        data={"label": "Option B", "source_type": "url", "source_url": "https://example.com/b", "order": "1"},
-    )
-    assert res.status_code == 201
-    option_b_id = res.json()["id"]
-
-    # 4. Activate the test
-    res = client.patch(f"/api/v1/tests/{test_id}", json={"status": "active"})
-    assert res.status_code == 200
-    assert res.json()["status"] == "active"
-
-    # 5. Cannot add questions to active test
-    res = client.post(
-        f"/api/v1/tests/{test_id}/questions",
-        json={"title": "Another question"},
-    )
-    assert res.status_code == 403
-
-    # 6. Respondent gets the test
-    res = client.get(f"/api/v1/respond/{slug}")
-    assert res.status_code == 200
-    assert res.json()["name"] == "My Test"
-    assert len(res.json()["questions"]) == 1
-
-    # 7. Submit answer
-    res = client.post(
-        f"/api/v1/respond/{slug}/answers",
-        json={
-            "session_id": "test-session-1",
-            "question_id": question_id,
-            "option_id": option_a_id,
-            "followup_text": "I liked it",
-        },
-    )
-    assert res.status_code == 201
-
-    # 8. Duplicate answer rejected (IntegrityError-based)
-    res = client.post(
-        f"/api/v1/respond/{slug}/answers",
-        json={
-            "session_id": "test-session-1",
-            "question_id": question_id,
-            "option_id": option_b_id,
-            "followup_text": "Changed my mind",
-        },
-    )
-    assert res.status_code == 409
-
-    # 9. Second respondent
-    res = client.post(
-        f"/api/v1/respond/{slug}/answers",
-        json={
-            "session_id": "test-session-2",
-            "question_id": question_id,
-            "option_id": option_b_id,
-            "followup_text": "Better colors",
-        },
-    )
-    assert res.status_code == 201
-
-    # 10. Analytics
-    res = client.get(f"/api/v1/tests/{test_id}/analytics")
-    assert res.status_code == 200
-    analytics = res.json()
-    assert analytics["total_sessions"] == 2
-    assert analytics["total_answers"] == 2
-    assert analytics["completed_sessions"] == 2
-    assert analytics["completion_rate"] == 100.0
-    assert len(analytics["questions"]) == 1
-    q_analytics = analytics["questions"][0]
-    assert q_analytics["total_votes"] == 2
-    # Each option should have 1 vote
-    votes = {o["label"]: o["votes"] for o in q_analytics["options"]}
-    assert votes["Option A"] == 1
-    assert votes["Option B"] == 1
-
-    # 11. CSV export
-    res = client.get(f"/api/v1/tests/{test_id}/export")
-    assert res.status_code == 200
-    assert "text/csv" in res.headers["content-type"]
-    csv_text = res.text
-    assert "Which design?" in csv_text
-    assert "Option A" in csv_text
-
-    # 12. Close the test
-    res = client.patch(f"/api/v1/tests/{test_id}", json={"status": "closed"})
-    assert res.status_code == 200
-    assert res.json()["status"] == "closed"
-
-    # 13. Respondent cannot submit to closed test
-    res = client.post(
-        f"/api/v1/respond/{slug}/answers",
-        json={
-            "session_id": "test-session-3",
-            "question_id": question_id,
-            "option_id": option_a_id,
-            "followup_text": "Too late",
-        },
-    )
-    assert res.status_code == 403
-```
-
-- [ ] **Step 2: Run the test**
-
-```bash
-cd backend && source venv/bin/activate && pip install pytest && python -m pytest tests/test_workflow.py -v
-```
-
-Expected: All assertions pass.
-
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/tests/
-git commit -m "test: add full workflow integration test with isolated in-memory test database"
+cd /Users/bharath/Documents/abtestingapp && git add backend/app/services/analytics_service.py backend/app/routes/analytics.py
+git commit -m "feat: add analytics with batch-fetch, completion rate, and CSV-injection-safe export"
 ```
 
+**Acceptance Criteria:**
+- Analytics uses batch-fetch for all queries (no N+1 -- verified by code review)
+- `completion_rate` is accurate: sessions answering ALL questions / total sessions * 100
+- `is_winner` handles ties correctly (all tied options marked as winner)
+- CSV export includes header row even when no responses
+- CSV cells sanitized for injection (cells starting with `=`, `+`, `-`, `@`)
+- CSV Content-Disposition header includes the test slug in the filename
+- `generate_csv` also uses batch-fetch (no per-question response queries)
+
+**Test Strategy:** Tested in Task 14 integration test.
+
 ---
 
-### Phase 2: Frontend Foundation
-
----
-
-### Task 11: Next.js project scaffolding with route groups
+### Task 11: Next.js Project Scaffolding
 
 **Files:**
 - Create: `frontend/` (via create-next-app)
-- Modify: `frontend/app/globals.css`
-- Create: `frontend/lib/constants.ts`
-- Create: `frontend/lib/types.ts`
-- Create: `frontend/lib/api.ts`
+- Modify: `frontend/app/layout.tsx`
 - Create: `frontend/app/(designer)/layout.tsx`
 - Create: `frontend/app/respond/[slug]/layout.tsx`
 
-Route groups are set up from the start to avoid file moves later.
+**What:** Create the Next.js project with TypeScript and Tailwind. Pin `create-next-app` version to avoid interactive prompts. Set up route groups from the start: `(designer)` group with Navbar placeholder and `respond` group without Navbar. Create directory structure for all page routes.
 
-- [ ] **Step 1: Create Next.js project**
+**Dependencies:** Task 1
+
+**Complexity:** M
+
+- [ ] **Step 1: Create Next.js project (pinned version)**
 
 ```bash
-cd /Users/bharath/Documents/abtestingapp && npx create-next-app@latest frontend --typescript --tailwind --eslint --app --src-dir=false --import-alias="@/*" --use-npm
+cd /Users/bharath/Documents/abtestingapp && npx create-next-app@14 frontend --typescript --tailwind --eslint --app --src-dir=false --import-alias="@/*" --use-npm
 ```
 
-- [ ] **Step 2: Write constants.ts (single source of truth for API URL)**
+Note: Pinned to `@14` to avoid unexpected interactive prompts from newer versions. If prompted about Turbopack, answer "No".
+
+- [ ] **Step 2: Create route group directories**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/frontend && mkdir -p "app/(designer)/tests/new" "app/(designer)/tests/[testId]/analytics" "app/respond/[slug]" "components/layout" "components/test-builder" "components/respondent" "components/analytics" "components/shared" "lib"
+```
+
+- [ ] **Step 3: Update root layout (NO Navbar)**
+
+Replace `frontend/app/layout.tsx` with:
+
+```tsx
+// frontend/app/layout.tsx
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata: Metadata = {
+  title: "DesignPoll",
+  description: "A/B testing for UI/UX designers",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body className={`${inter.className} bg-gray-50 min-h-screen`}>
+        {children}
+      </body>
+    </html>
+  );
+}
+```
+
+- [ ] **Step 4: Create designer route group layout (WITH Navbar placeholder)**
+
+```tsx
+// frontend/app/(designer)/layout.tsx
+export default function DesignerLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      {/* Navbar will be added in Task 13 */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {children}
+      </main>
+    </>
+  );
+}
+```
+
+- [ ] **Step 5: Create respondent layout (clean, no Navbar)**
+
+```tsx
+// frontend/app/respond/[slug]/layout.tsx
+export default function RespondLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {children}
+      </main>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: Create placeholder pages to verify routing**
+
+Create `frontend/app/(designer)/page.tsx`:
+```tsx
+export default function DashboardPage() {
+  return <h1>Dashboard (placeholder)</h1>;
+}
+```
+
+- [ ] **Step 7: Verify dev server starts and routing works**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/frontend && npm run dev
+```
+
+Expected: `http://localhost:3000` shows "Dashboard (placeholder)". No 404.
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add frontend/
+git commit -m "feat: scaffold Next.js frontend with route groups and Tailwind CSS"
+```
+
+**Acceptance Criteria:**
+- `npm run dev` starts without errors
+- `/` serves the designer layout (with main container)
+- Route group directories exist: `(designer)`, `respond/[slug]`
+- Root layout does NOT include a Navbar
+- Respondent layout is clean (no Navbar)
+- `create-next-app` version is pinned (`@14`)
+
+**Test Strategy:** Start dev server, visit `/`, confirm placeholder renders.
+
+---
+
+### Task 12: Frontend TypeScript Types, Constants, and API Client
+
+**Files:**
+- Create: `frontend/lib/constants.ts`
+- Create: `frontend/lib/types.ts`
+- Create: `frontend/lib/api.ts`
+
+**What:** Define all TypeScript interfaces matching backend API response shapes, the centralized API base URL constant, and all fetch functions for communicating with the backend. Every frontend file that calls the API imports from these three files.
+
+**Dependencies:** Task 11
+
+**Complexity:** M
+
+- [ ] **Step 1: Write constants.ts**
 
 ```typescript
 // frontend/lib/constants.ts
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 ```
 
-- [ ] **Step 3: Write types.ts**
+Note: This is the single source of truth for the API URL. No other file should reference `process.env.NEXT_PUBLIC_API_URL` directly.
+
+- [ ] **Step 2: Write types.ts**
 
 ```typescript
 // frontend/lib/types.ts
@@ -2914,9 +2572,7 @@ export interface Analytics {
 }
 ```
 
-- [ ] **Step 4: Write api.ts**
-
-All API calls use `API_BASE_URL` from `constants.ts`. No inline fallbacks.
+- [ ] **Step 3: Write api.ts**
 
 ```typescript
 // frontend/lib/api.ts
@@ -3048,95 +2704,34 @@ export function getExportUrl(testId: number): string {
 }
 ```
 
-- [ ] **Step 5: Set up route groups from the start**
-
-Update root layout to be minimal (no Navbar):
-
-```tsx
-// frontend/app/layout.tsx
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
-  title: "DesignPoll",
-  description: "A/B testing for UI/UX designers",
-};
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <html lang="en">
-      <body className={`${inter.className} bg-gray-50 min-h-screen`}>
-        {children}
-      </body>
-    </html>
-  );
-}
-```
-
-Create designer route group layout (with Navbar):
-
-```tsx
-// frontend/app/(designer)/layout.tsx
-import Navbar from "@/components/layout/Navbar";
-
-export default function DesignerLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <Navbar />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {children}
-      </main>
-    </>
-  );
-}
-```
-
-Create respondent layout (clean, no Navbar):
-
-```tsx
-// frontend/app/respond/[slug]/layout.tsx
-export default function RespondLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {children}
-      </main>
-    </div>
-  );
-}
-```
-
-Create the directory structure for route groups:
+- [ ] **Step 4: Verify TypeScript compilation**
 
 ```bash
-cd frontend && mkdir -p "app/(designer)/tests/new" "app/(designer)/tests/[testId]/analytics" "app/respond/[slug]"
+cd /Users/bharath/Documents/abtestingapp/frontend && npx tsc --noEmit
 ```
 
-- [ ] **Step 6: Commit**
+Expected: No type errors.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/
-git commit -m "feat: scaffold Next.js frontend with route groups, TypeScript types, and API client"
+cd /Users/bharath/Documents/abtestingapp && git add frontend/lib/
+git commit -m "feat: add TypeScript types, API client, and constants for frontend-backend communication"
 ```
+
+**Acceptance Criteria:**
+- `API_BASE_URL` is the single source of truth (no other file has inline `process.env.NEXT_PUBLIC_API_URL`)
+- All TypeScript interfaces match the backend Pydantic schema field names exactly
+- `apiFetch` handles non-2xx responses by parsing `detail` from JSON error body
+- `createOption` and `updateOption` do NOT set Content-Type header (critical for multipart)
+- `getExportUrl` returns a URL string (not a fetch call) for direct browser download
+- `TestDetail` uses flat interface (not Omit)
+
+**Test Strategy:** TypeScript compilation check (`tsc --noEmit`).
 
 ---
 
-### Task 12: Shared UI components
+### Task 13: Shared UI Components (Button, Card, EmptyState, StatusBadge, ConfirmDialog, Navbar)
 
 **Files:**
 - Create: `frontend/components/shared/Button.tsx`
@@ -3145,12 +2740,23 @@ git commit -m "feat: scaffold Next.js frontend with route groups, TypeScript typ
 - Create: `frontend/components/shared/StatusBadge.tsx`
 - Create: `frontend/components/shared/ConfirmDialog.tsx`
 - Create: `frontend/components/layout/Navbar.tsx`
+- Modify: `frontend/app/(designer)/layout.tsx` (add Navbar import)
 
-- [ ] **Step 1: Write Button component**
+**What:** Build all reusable UI components used across multiple pages. Button supports variants (primary/secondary/danger), sizes, and ref forwarding (needed by ConfirmDialog). ConfirmDialog has Escape key handler, aria-modal, and autoFocus on cancel button. Navbar has logo and navigation links.
+
+**Dependencies:** Task 11
+
+**Complexity:** M
+
+The complete code for all components is provided inline in this task. See the code blocks in the current implementation plan for Task 13 in Revision 2 -- those are unchanged and fully self-contained. Specifically:
+
+- [ ] **Step 1: Write Button component (with forwardRef)**
 
 ```tsx
 // frontend/components/shared/Button.tsx
 "use client";
+
+import { forwardRef } from "react";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "danger";
@@ -3169,16 +2775,13 @@ const sizeClasses = {
   lg: "px-6 py-3 text-base",
 };
 
-export default function Button({
-  variant = "primary",
-  size = "md",
-  className = "",
-  disabled,
-  children,
-  ...props
-}: ButtonProps) {
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "primary", size = "md", className = "", disabled, children, ...props },
+  ref
+) {
   return (
     <button
+      ref={ref}
       className={`inline-flex items-center justify-center font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       disabled={disabled}
       {...props}
@@ -3186,7 +2789,9 @@ export default function Button({
       {children}
     </button>
   );
-}
+});
+
+export default Button;
 ```
 
 - [ ] **Step 2: Write Card component**
@@ -3251,7 +2856,7 @@ export default function StatusBadge({ status }: { status: string }) {
 }
 ```
 
-- [ ] **Step 5: Write ConfirmDialog component (with Escape key, aria-modal, autoFocus)**
+- [ ] **Step 5: Write ConfirmDialog component**
 
 ```tsx
 // frontend/components/shared/ConfirmDialog.tsx
@@ -3322,8 +2927,6 @@ export default function ConfirmDialog({
 }
 ```
 
-Note: The `Button` component needs to support `ref` forwarding via `React.forwardRef` for the `autoFocus` pattern above. Alternatively, use a native `<button>` with `autoFocus` for the cancel button. The implementation should ensure the cancel button receives focus when the dialog opens.
-
 - [ ] **Step 6: Write Navbar component**
 
 ```tsx
@@ -3356,27 +2959,553 @@ export default function Navbar() {
 }
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Update designer layout to include Navbar**
+
+Replace `frontend/app/(designer)/layout.tsx` with:
+
+```tsx
+// frontend/app/(designer)/layout.tsx
+import Navbar from "@/components/layout/Navbar";
+
+export default function DesignerLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <Navbar />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {children}
+      </main>
+    </>
+  );
+}
+```
+
+- [ ] **Step 8: Verify components render**
 
 ```bash
-git add frontend/components/ frontend/app/layout.tsx
+cd /Users/bharath/Documents/abtestingapp/frontend && npx tsc --noEmit
+```
+
+- [ ] **Step 9: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add frontend/components/ "frontend/app/(designer)/layout.tsx"
 git commit -m "feat: add shared UI components, Navbar, and ConfirmDialog with accessibility"
 ```
 
+**Acceptance Criteria:**
+- Button supports `ref` forwarding (via `forwardRef`)
+- ConfirmDialog closes on Escape key press
+- ConfirmDialog has `aria-modal="true"` and `role="dialog"`
+- Cancel button receives focus when dialog opens
+- StatusBadge renders correct colors for draft/active/closed
+- Navbar appears on designer pages but NOT on respondent pages
+
+**Test Strategy:** TypeScript compilation + visual verification when pages are built.
+
 ---
 
-### Phase 3: Frontend Pages
-
----
-
-### Task 13: Dashboard page (test list -- Client Component)
+### Task 14: Backend Integration Test (Full Workflow with Test DB Isolation)
 
 **Files:**
-- Create: `frontend/app/(designer)/page.tsx`
+- Create: `backend/tests/conftest.py`
+- Create: `backend/tests/test_workflow.py`
 
-- [ ] **Step 1: Write dashboard page as Client Component**
+**What:** Write a comprehensive integration test that exercises the entire API workflow. Uses an in-memory SQLite database with `StaticPool` and explicit model imports before `create_all()`, with `get_session` dependency override for full isolation. Includes monkeypatched `MEDIA_DIR` to isolate from production media/.
 
-The dashboard is a Client Component for consistency with all other data-fetching pages and resilience (does not require the backend to be running at build time or SSR time).
+**Dependencies:** Task 6, Task 7, Task 8, Task 9, Task 10 (all backend routes must exist)
+
+**Complexity:** M
+
+- [ ] **Step 1: Write conftest.py (with StaticPool and media isolation)**
+
+```python
+# backend/tests/conftest.py
+"""Test configuration: use an in-memory SQLite database with StaticPool to isolate tests."""
+import pytest
+from pathlib import Path
+from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine, text
+from app.database import get_session
+
+# Explicit model imports BEFORE create_all to ensure metadata is registered
+from app.models import Test, ScreenQuestion, Option, Response  # noqa: F401
+
+# In-memory SQLite for test isolation -- StaticPool ensures the same connection
+# is reused across threads, which is required for in-memory SQLite.
+TEST_DATABASE_URL = "sqlite://"
+test_engine = create_engine(
+    TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+
+
+@pytest.fixture(name="test_media_dir", autouse=True)
+def test_media_dir_fixture(tmp_path, monkeypatch):
+    """Isolate media writes from production backend/media/ directory.
+
+    Creates a per-test temp directory and monkeypatches MEDIA_DIR in both
+    config and image_service modules.
+    """
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr("app.config.MEDIA_DIR", media_dir)
+    monkeypatch.setattr("app.services.image_service.MEDIA_DIR", media_dir)
+    return media_dir
+
+
+@pytest.fixture(name="session", autouse=True)
+def session_fixture():
+    """Create fresh tables for each test, yield session, then drop."""
+    # Enable foreign keys before creating tables
+    with test_engine.connect() as conn:
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.commit()
+    SQLModel.metadata.create_all(test_engine)
+    with Session(test_engine) as session:
+        yield session
+    SQLModel.metadata.drop_all(test_engine)
+
+
+@pytest.fixture(name="client")
+def client_fixture(session: Session, test_media_dir):
+    """TestClient that uses the test database session.
+
+    Depends on test_media_dir to ensure media isolation is set up before
+    the app is loaded.
+    """
+    def get_session_override():
+        yield session
+
+    from main import app
+    app.dependency_overrides[get_session] = get_session_override
+    client = TestClient(app)
+    yield client
+    app.dependency_overrides.clear()
+```
+
+- [ ] **Step 2: Write test_workflow.py**
+
+```python
+# backend/tests/test_workflow.py
+"""Full workflow integration test: create test -> add questions -> add options -> activate -> respond -> analytics."""
+
+
+def test_full_workflow(client):
+    # 1. Create a test
+    res = client.post("/api/v1/tests", json={"name": "My Test", "description": "A test"})
+    assert res.status_code == 201
+    test = res.json()
+    test_id = test["id"]
+    slug = test["slug"]
+    assert test["status"] == "draft"
+
+    # 2. Add a question
+    res = client.post(
+        f"/api/v1/tests/{test_id}/questions",
+        json={"title": "Which design?", "followup_required": True},
+    )
+    assert res.status_code == 201
+    question = res.json()
+    question_id = question["id"]
+
+    # 3. Add options using source_type=url (no image files needed in test)
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Option A", "source_type": "url", "source_url": "https://example.com/a", "order": "0"},
+    )
+    assert res.status_code == 201
+    opt_a = res.json()
+    option_a_id = opt_a["id"]
+    assert opt_a["source_type"] == "url"
+    assert opt_a["source_url"] == "https://example.com/a"
+
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Option B", "source_type": "url", "source_url": "https://example.com/b", "order": "1"},
+    )
+    assert res.status_code == 201
+    option_b_id = res.json()["id"]
+
+    # 4. Activate the test
+    res = client.patch(f"/api/v1/tests/{test_id}", json={"status": "active"})
+    assert res.status_code == 200
+    assert res.json()["status"] == "active"
+
+    # 5. Cannot add questions to active test
+    res = client.post(
+        f"/api/v1/tests/{test_id}/questions",
+        json={"title": "Another question"},
+    )
+    assert res.status_code == 403
+
+    # 6. Respondent gets the test
+    res = client.get(f"/api/v1/respond/{slug}")
+    assert res.status_code == 200
+    assert res.json()["name"] == "My Test"
+    assert len(res.json()["questions"]) == 1
+
+    # 7. Submit answer
+    res = client.post(
+        f"/api/v1/respond/{slug}/answers",
+        json={
+            "session_id": "test-session-1",
+            "question_id": question_id,
+            "option_id": option_a_id,
+            "followup_text": "I liked it",
+        },
+    )
+    assert res.status_code == 201
+
+    # 8. Duplicate answer rejected (IntegrityError-based)
+    res = client.post(
+        f"/api/v1/respond/{slug}/answers",
+        json={
+            "session_id": "test-session-1",
+            "question_id": question_id,
+            "option_id": option_b_id,
+            "followup_text": "Changed my mind",
+        },
+    )
+    assert res.status_code == 409
+
+    # 9. Second respondent
+    res = client.post(
+        f"/api/v1/respond/{slug}/answers",
+        json={
+            "session_id": "test-session-2",
+            "question_id": question_id,
+            "option_id": option_b_id,
+            "followup_text": "Better colors",
+        },
+    )
+    assert res.status_code == 201
+
+    # 10. Analytics
+    res = client.get(f"/api/v1/tests/{test_id}/analytics")
+    assert res.status_code == 200
+    analytics = res.json()
+    assert analytics["total_sessions"] == 2
+    assert analytics["total_answers"] == 2
+    assert analytics["completed_sessions"] == 2
+    assert analytics["completion_rate"] == 100.0
+    assert len(analytics["questions"]) == 1
+    q_analytics = analytics["questions"][0]
+    assert q_analytics["total_votes"] == 2
+    votes = {o["label"]: o["votes"] for o in q_analytics["options"]}
+    assert votes["Option A"] == 1
+    assert votes["Option B"] == 1
+
+    # 11. CSV export
+    res = client.get(f"/api/v1/tests/{test_id}/export")
+    assert res.status_code == 200
+    assert "text/csv" in res.headers["content-type"]
+    csv_text = res.text
+    assert "Which design?" in csv_text
+    assert "Option A" in csv_text
+
+    # 12. Close the test
+    res = client.patch(f"/api/v1/tests/{test_id}", json={"status": "closed"})
+    assert res.status_code == 200
+    assert res.json()["status"] == "closed"
+
+    # 13. Respondent cannot submit to closed test
+    res = client.post(
+        f"/api/v1/respond/{slug}/answers",
+        json={
+            "session_id": "test-session-3",
+            "question_id": question_id,
+            "option_id": option_a_id,
+            "followup_text": "Too late",
+        },
+    )
+    assert res.status_code == 403
+```
+
+- [ ] **Step 3: Run the test**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && python -m pytest tests/ -v
+```
+
+Expected: All assertions pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add backend/tests/
+git commit -m "test: add full workflow integration test with StaticPool, media isolation, and in-memory DB"
+```
+
+**Acceptance Criteria:**
+- Test uses in-memory SQLite with `StaticPool` (no disk file)
+- Explicit model imports before `create_all()`
+- `get_session` dependency is properly overridden
+- Media writes are isolated from production `backend/media/` via monkeypatched `MEDIA_DIR`
+- All 13 workflow steps pass
+- Duplicate answer returns 409 (IntegrityError handling works)
+- Analytics returns correct completion rate
+- CSV export returns text/csv content type
+- Closed test rejects respondent submissions with 403
+
+**Test Strategy:** This IS the test. Run `pytest tests/ -v` and all assertions must pass.
+
+---
+
+### Task 14b: Upload and URL Validation Tests
+
+**Files:**
+- Create: `backend/tests/test_upload.py`
+
+**What:** Test the image upload path and URL validation that is not covered by the workflow test (which only uses URL-mode options). Covers: valid upload, invalid MIME (400), oversized file (400), source-type transitions, option delete with file cleanup, and URL scheme validation (javascript:/data:/file: rejected).
+
+**Dependencies:** Task 6, Task 7, Task 8, Task 9, Task 10 (all backend routes must exist)
+
+**Complexity:** M
+
+- [ ] **Step 1: Write test_upload.py**
+
+```python
+# backend/tests/test_upload.py
+"""Tests for image upload, file cleanup, and URL validation."""
+import io
+from pathlib import Path
+from PIL import Image
+
+
+def _create_test_image(width=100, height=100, format="PNG") -> io.BytesIO:
+    """Create a minimal valid test image."""
+    img = Image.new("RGB", (width, height), color="red")
+    buf = io.BytesIO()
+    img.save(buf, format=format)
+    buf.seek(0)
+    return buf
+
+
+def _setup_draft_test_with_question(client):
+    """Helper: create a draft test with one question, return (test_id, question_id)."""
+    res = client.post("/api/v1/tests", json={"name": "Upload Test"})
+    assert res.status_code == 201
+    test_id = res.json()["id"]
+
+    res = client.post(
+        f"/api/v1/tests/{test_id}/questions",
+        json={"title": "Upload question"},
+    )
+    assert res.status_code == 201
+    question_id = res.json()["id"]
+
+    return test_id, question_id
+
+
+def test_valid_image_upload(client, test_media_dir):
+    """Step 1: Valid image upload succeeds."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    img_buf = _create_test_image()
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Uploaded Option", "source_type": "upload"},
+        files={"image": ("test.png", img_buf, "image/png")},
+    )
+    assert res.status_code == 201
+    option = res.json()
+    assert option["source_type"] == "upload"
+    assert option["image_url"] is not None
+    assert option["image_url"].startswith(f"/media/{test_id}/")
+
+
+def test_invalid_mime_type(client, test_media_dir):
+    """Step 2: Invalid MIME type returns 400."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Bad Option", "source_type": "upload"},
+        files={"image": ("test.txt", io.BytesIO(b"not an image"), "text/plain")},
+    )
+    assert res.status_code == 400
+    assert "Invalid image type" in res.json()["detail"]
+
+
+def test_oversized_file(client, test_media_dir):
+    """Step 3: Oversized file returns 400."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    # Create a file larger than 10MB
+    large_content = b"x" * (10 * 1024 * 1024 + 1)
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Large Option", "source_type": "upload"},
+        files={"image": ("large.png", io.BytesIO(large_content), "image/png")},
+    )
+    assert res.status_code == 400
+    assert "too large" in res.json()["detail"]
+
+
+def test_source_type_transition_upload_to_url(client, test_media_dir):
+    """Step 4: Transition from upload to URL clears image, sets source_url."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    # Create upload option
+    img_buf = _create_test_image()
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Transition Option", "source_type": "upload"},
+        files={"image": ("test.png", img_buf, "image/png")},
+    )
+    assert res.status_code == 201
+    option_id = res.json()["id"]
+    assert res.json()["image_url"] is not None
+
+    # Switch to URL
+    res = client.patch(
+        f"/api/v1/options/{option_id}",
+        data={"source_type": "url", "source_url": "https://example.com/design"},
+    )
+    assert res.status_code == 200
+    assert res.json()["source_type"] == "url"
+    assert res.json()["source_url"] == "https://example.com/design"
+    assert res.json()["image_url"] is None
+
+
+def test_source_type_transition_url_to_upload(client, test_media_dir):
+    """Step 5: Transition from URL to upload clears source_url, sets image."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    # Create URL option
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "URL Option", "source_type": "url", "source_url": "https://example.com/a"},
+    )
+    assert res.status_code == 201
+    option_id = res.json()["id"]
+
+    # Switch to upload
+    img_buf = _create_test_image()
+    res = client.patch(
+        f"/api/v1/options/{option_id}",
+        data={"source_type": "upload"},
+        files={"image": ("test.png", img_buf, "image/png")},
+    )
+    assert res.status_code == 200
+    assert res.json()["source_type"] == "upload"
+    assert res.json()["image_url"] is not None
+    assert res.json()["source_url"] is None
+
+
+def test_option_delete_cleans_up_files(client, test_media_dir):
+    """Step 6: Deleting an upload option removes files from disk."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    img_buf = _create_test_image()
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Delete Me", "source_type": "upload"},
+        files={"image": ("test.png", img_buf, "image/png")},
+    )
+    assert res.status_code == 201
+    option = res.json()
+    image_url = option["image_url"]  # e.g., /media/1/uuid.png
+
+    # Extract filename from URL
+    filename = image_url.split("/")[-1]
+    test_dir = test_media_dir / str(test_id)
+
+    # Verify files exist on disk
+    assert (test_dir / filename).exists()
+    assert (test_dir / f"thumb_{filename}").exists()
+
+    # Delete option
+    res = client.delete(f"/api/v1/options/{option['id']}")
+    assert res.status_code == 204
+
+    # Verify files removed from disk
+    assert not (test_dir / filename).exists()
+    assert not (test_dir / f"thumb_{filename}").exists()
+
+
+def test_url_scheme_javascript_rejected(client, test_media_dir):
+    """Step 7: javascript: URL scheme is rejected with 400."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "XSS Option", "source_type": "url", "source_url": "javascript:alert(1)"},
+    )
+    assert res.status_code == 400
+    assert "Invalid URL scheme" in res.json()["detail"]
+
+
+def test_url_scheme_data_rejected(client, test_media_dir):
+    """Step 8: data: URL scheme is rejected with 400."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "Data Option", "source_type": "url", "source_url": "data:text/html,<script>alert(1)</script>"},
+    )
+    assert res.status_code == 400
+    assert "Invalid URL scheme" in res.json()["detail"]
+
+
+def test_url_scheme_file_rejected(client, test_media_dir):
+    """Step 9: file: URL scheme is rejected with 400."""
+    test_id, question_id = _setup_draft_test_with_question(client)
+
+    res = client.post(
+        f"/api/v1/questions/{question_id}/options",
+        data={"label": "File Option", "source_type": "url", "source_url": "file:///etc/passwd"},
+    )
+    assert res.status_code == 400
+    assert "Invalid URL scheme" in res.json()["detail"]
+```
+
+- [ ] **Step 2: Run the tests**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && python -m pytest tests/ -v
+```
+
+Expected: All tests pass (both test_workflow.py and test_upload.py).
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add backend/tests/test_upload.py
+git commit -m "test: add upload, file cleanup, and URL validation tests"
+```
+
+**Acceptance Criteria:**
+- Valid image upload succeeds with 201
+- Invalid MIME type returns 400
+- Oversized file returns 400
+- Source-type transitions work (upload->url and url->upload)
+- Option delete removes both original and thumbnail files from disk (verified via `pathlib.Path.exists()`)
+- `javascript:`, `data:`, `file:` URL schemes all return 400
+- Media writes are isolated from production `backend/media/`
+
+**Test Strategy:** Run `pytest tests/ -v` -- all tests pass.
+
+---
+
+### Task 15: Dashboard Page (Test List -- Client Component)
+
+**Files:**
+- Modify: `frontend/app/(designer)/page.tsx` (replace placeholder)
+
+**What:** Build the main dashboard page as a Client Component that fetches and displays all tests. Shows test name, status badge, question/response counts, and creation date. Empty state with "Create Test" link when no tests exist. Error state when backend is unreachable.
+
+**Dependencies:** Task 12, Task 13
+
+**Complexity:** M
+
+- [ ] **Step 1: Write the dashboard page**
 
 ```tsx
 // frontend/app/(designer)/page.tsx
@@ -3466,35 +3595,40 @@ export default function DashboardPage() {
 }
 ```
 
-- [ ] **Step 2: Verify the page renders**
-
-Start both servers:
-- Backend: `cd backend && uvicorn main:app --reload --port 8000`
-- Frontend: `cd frontend && npm run dev`
-
-Visit `http://localhost:3000`. Expected: "No tests yet" empty state.
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
-git add "frontend/app/(designer)/page.tsx"
+cd /Users/bharath/Documents/abtestingapp && git add "frontend/app/(designer)/page.tsx"
 git commit -m "feat: add dashboard page as Client Component with test listing"
 ```
 
+**Acceptance Criteria:**
+- Page renders without backend running (shows error state, not crash)
+- With backend running, shows list of tests or empty state
+- Each test card shows name, status badge, question count, response count, date
+- Clicking a card navigates to `/tests/{id}`
+- "Create Test" link in empty state navigates to `/tests/new`
+
+**Test Strategy:** Visual verification with both servers running. Verify empty state, then create a test via API and refresh.
+
 ---
 
-### Task 14: Test builder page (create new test)
+### Task 16: Test Builder Page (Create New Test)
 
 **Files:**
 - Create: `frontend/app/(designer)/tests/new/page.tsx`
 - Create: `frontend/components/test-builder/TestMetaForm.tsx`
-- Create: `frontend/components/test-builder/QuestionEditor.tsx`
-- Create: `frontend/components/test-builder/OptionEditor.tsx`
 - Create: `frontend/components/test-builder/ImageUploader.tsx`
+- Create: `frontend/components/test-builder/OptionEditor.tsx`
+- Create: `frontend/components/test-builder/QuestionEditor.tsx`
+
+**What:** Build the create-test page and all test-builder components. These components are also imported by Task 17 (Test Detail Page). The code for all components is provided inline below.
+
+**Dependencies:** Task 12, Task 13
+
+**Complexity:** L
 
 - [ ] **Step 1: Write ImageUploader component**
-
-Uses `API_BASE_URL` from constants (no inline fallback).
 
 ```tsx
 // frontend/components/test-builder/ImageUploader.tsx
@@ -3573,13 +3707,13 @@ export default function ImageUploader({ currentImageUrl, onFileSelect }: ImageUp
 }
 ```
 
-- [ ] **Step 2: Write OptionEditor component (with source_type toggle)**
+- [ ] **Step 2: Write OptionEditor component (with source_type toggle and unique radio name)**
 
 ```tsx
 // frontend/components/test-builder/OptionEditor.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useId } from "react";
 import ImageUploader from "./ImageUploader";
 import Button from "@/components/shared/Button";
 
@@ -3603,6 +3737,7 @@ export default function OptionEditor({
   onDelete,
   isNew = false,
 }: OptionEditorProps) {
+  const uniqueId = useId();
   const [label, setLabel] = useState(initialLabel);
   const [sourceType, setSourceType] = useState<"upload" | "url">(initialSourceType);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -3646,12 +3781,12 @@ export default function OptionEditor({
         )}
       </div>
 
-      {/* Source type toggle */}
+      {/* Source type toggle -- uses useId() for unique radio group name */}
       <div className="flex gap-4">
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input
             type="radio"
-            name={`source-type-${initialLabel}`}
+            name={`source-type-${uniqueId}`}
             checked={sourceType === "upload"}
             onChange={() => setSourceType("upload")}
             className="text-blue-600"
@@ -3661,7 +3796,7 @@ export default function OptionEditor({
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input
             type="radio"
-            name={`source-type-${initialLabel}`}
+            name={`source-type-${uniqueId}`}
             checked={sourceType === "url"}
             onChange={() => setSourceType("url")}
             className="text-blue-600"
@@ -3690,7 +3825,7 @@ export default function OptionEditor({
 }
 ```
 
-- [ ] **Step 3: Write QuestionEditor component (with max 5 options enforcement)**
+- [ ] **Step 3: Write QuestionEditor component (with max 5 options)**
 
 ```tsx
 // frontend/components/test-builder/QuestionEditor.tsx
@@ -3999,23 +4134,43 @@ export default function NewTestPage() {
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Verify TypeScript compilation**
 
 ```bash
-git add "frontend/app/(designer)/tests/" frontend/components/test-builder/
-git commit -m "feat: add test builder page with source_type toggle, max 5 options, and error handling"
+cd /Users/bharath/Documents/abtestingapp/frontend && npx tsc --noEmit
 ```
+
+- [ ] **Step 7: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add "frontend/app/(designer)/tests/new/" frontend/components/test-builder/
+git commit -m "feat: add test builder page with source_type toggle, max 5 options, and drag-drop image upload"
+```
+
+**Acceptance Criteria:**
+- Creating a test navigates to its detail page
+- OptionEditor shows radio toggle between "Image Upload" and "URL"
+- Radio button names use `useId()` for uniqueness (no collisions)
+- ImageUploader validates file type and size client-side before upload
+- "Add Option" editor disappears when question has 5 options
+- QuestionEditor calls API via FormData (not JSON) for option mutations
+
+**Test Strategy:** TypeScript compilation + visual verification with both servers running.
 
 ---
 
-### Task 15: Test detail/edit page
+### Task 17: Test Detail/Edit Page
 
 **Files:**
 - Create: `frontend/app/(designer)/tests/[testId]/page.tsx`
 
-- [ ] **Step 1: Write test detail page**
+**What:** Build the test detail page showing test metadata, status controls, questions (editable in draft, read-only in active/closed), shareable link, and delete with confirmation. Imports `QuestionEditor` and `TestMetaForm` from Task 16.
 
-Uses `API_BASE_URL` from constants. Already inside `(designer)` route group.
+**Dependencies:** Task 12, Task 13, Task 16 (uses QuestionEditor, TestMetaForm from test-builder components)
+
+**Complexity:** L
+
+- [ ] **Step 1: Write the test detail page**
 
 ```tsx
 // frontend/app/(designer)/tests/[testId]/page.tsx
@@ -4042,6 +4197,10 @@ import QuestionEditor from "@/components/test-builder/QuestionEditor";
 export default function TestDetailPage() {
   const params = useParams();
   const router = useRouter();
+
+  // Null guard for useParams() during prerendering
+  if (!params?.testId) return <p className="text-gray-500">Loading...</p>;
+
   const testId = Number(params.testId);
 
   const [test, setTest] = useState<TestDetail | null>(null);
@@ -4244,21 +4403,39 @@ export default function TestDetailPage() {
 - [ ] **Step 2: Commit**
 
 ```bash
-git add "frontend/app/(designer)/tests/"
+cd /Users/bharath/Documents/abtestingapp && git add "frontend/app/(designer)/tests/[testId]/page.tsx"
 git commit -m "feat: add test detail page with status management, source_type display, and question editing"
 ```
 
+**Acceptance Criteria:**
+- Page loads test data by ID from URL params (with null guard)
+- Draft tests show editable QuestionEditors
+- Active/closed tests show read-only question summaries with option previews
+- Activate button disabled when questions don't meet 2-5 options requirement
+- Share URL shown after activation
+- Delete triggers ConfirmDialog, then navigates to dashboard on confirm
+- Analytics link navigates to `/tests/{id}/analytics`
+- URL options in read-only mode have `rel="noopener noreferrer"` on links
+
+**Test Strategy:** Visual verification with both servers running.
+
 ---
 
-### Task 16: Respondent flow page
+### Task 18: Respondent Flow Page
 
 **Files:**
 - Create: `frontend/app/respond/[slug]/page.tsx`
 - Create: `frontend/components/respondent/IntroScreen.tsx`
-- Create: `frontend/components/respondent/QuestionView.tsx`
-- Create: `frontend/components/respondent/OptionCard.tsx`
-- Create: `frontend/components/respondent/FollowUpInput.tsx`
 - Create: `frontend/components/respondent/ProgressBar.tsx`
+- Create: `frontend/components/respondent/FollowUpInput.tsx`
+- Create: `frontend/components/respondent/OptionCard.tsx`
+- Create: `frontend/components/respondent/QuestionView.tsx`
+
+**What:** Build the full respondent experience. FollowUpInput renders the question-specific `followup_prompt` text (not a hardcoded default). All new-tab links use `rel="noopener noreferrer"`.
+
+**Dependencies:** Task 12, Task 13
+
+**Complexity:** L
 
 - [ ] **Step 1: Write ProgressBar component**
 
@@ -4289,7 +4466,7 @@ export default function ProgressBar({ current, total }: ProgressBarProps) {
 }
 ```
 
-- [ ] **Step 2: Write FollowUpInput component**
+- [ ] **Step 2: Write FollowUpInput component (renders configured prompt text)**
 
 ```tsx
 // frontend/components/respondent/FollowUpInput.tsx
@@ -4326,7 +4503,7 @@ export default function FollowUpInput({ prompt, required, value, onChange }: Fol
 }
 ```
 
-- [ ] **Step 3: Write OptionCard component (handles both upload and URL options)**
+- [ ] **Step 3: Write OptionCard component (handles upload + URL, rel="noopener noreferrer")**
 
 ```tsx
 // frontend/components/respondent/OptionCard.tsx
@@ -4405,7 +4582,7 @@ export default function OptionCard({
 }
 ```
 
-- [ ] **Step 4: Write QuestionView component (with fixed useMemo dependency)**
+- [ ] **Step 4: Write QuestionView component (with Fisher-Yates shuffle)**
 
 ```tsx
 // frontend/components/respondent/QuestionView.tsx
@@ -4437,8 +4614,6 @@ export default function QuestionView({
   locked,
   onSelect,
 }: QuestionViewProps) {
-  // Shuffle once when the question first renders.
-  // Dependency array includes options.length so it re-shuffles if options change.
   const displayOptions = useMemo(() => {
     if (question.randomize_options) {
       return shuffleArray(question.options);
@@ -4451,7 +4626,6 @@ export default function QuestionView({
       <h2 className="text-xl font-semibold text-gray-900 mb-6 text-center">
         {question.title}
       </h2>
-      {/* Responsive grid: 1 column on mobile, 2 on sm+ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {displayOptions.map((option) => (
           <OptionCard
@@ -4498,13 +4672,13 @@ export default function IntroScreen({ name, description, onStart }: IntroScreenP
 }
 ```
 
-- [ ] **Step 6: Write the respondent flow page**
+- [ ] **Step 6: Write the respondent flow page (with null guard for useParams)**
 
 ```tsx
 // frontend/app/respond/[slug]/page.tsx
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { RespondentTest } from "@/lib/types";
 import { fetchTestForRespondent, submitAnswer } from "@/lib/api";
@@ -4518,6 +4692,10 @@ type Phase = "loading" | "error" | "intro" | "question" | "done";
 
 export default function RespondPage() {
   const params = useParams();
+
+  // Null guard for useParams() during prerendering
+  if (!params?.slug) return <p className="text-center text-gray-500 py-16">Loading...</p>;
+
   const slug = params.slug as string;
 
   const [test, setTest] = useState<RespondentTest | null>(null);
@@ -4552,9 +4730,8 @@ export default function RespondPage() {
     if (!test || selectedOptionId === null) return;
     const question = test.questions[currentIndex];
 
-    // Validate required followup
     if (question.followup_required && !followupText.trim()) {
-      return; // Button should be disabled, but guard anyway
+      return;
     }
 
     setSubmitting(true);
@@ -4665,28 +4842,50 @@ export default function RespondPage() {
 - [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/app/respond/ frontend/components/respondent/
-git commit -m "feat: add respondent flow with URL/upload support, responsive grid, and fixed useMemo deps"
+cd /Users/bharath/Documents/abtestingapp && git add frontend/app/respond/ frontend/components/respondent/
+git commit -m "feat: add respondent flow with lock-in, URL/upload support, responsive grid, and Fisher-Yates shuffle"
 ```
+
+**Acceptance Criteria:**
+- Intro screen shows test name and description
+- Options display correctly for both upload (image) and URL (iframe) modes
+- Clicking an option locks it in immediately (no undo)
+- Follow-up input appears after lock-in and renders the question-specific `followup_prompt` text (not a hardcoded default)
+- "Next" button disabled until selection is locked AND required followup is filled
+- Progress bar updates correctly
+- Thank-you screen shown after last question
+- Responsive: 1 column on mobile, 2 columns on desktop
+- No Navbar visible (respondent layout)
+- `useMemo` dependency array includes `question.options.length`
+- All "Open in new tab" links have `rel="noopener noreferrer"`
+- `useParams()` has a null guard
+
+**Test Strategy:** Visual verification with active test.
 
 ---
 
-### Task 17: Analytics dashboard page (with completion rate)
+### Task 19: Analytics Dashboard Page (with Recharts)
 
 **Files:**
-- Create: `frontend/app/(designer)/tests/[testId]/analytics/page.tsx`
 - Create: `frontend/components/analytics/SummaryStats.tsx`
 - Create: `frontend/components/analytics/VoteChart.tsx`
 - Create: `frontend/components/analytics/FollowUpList.tsx`
 - Create: `frontend/components/analytics/ExportButton.tsx`
+- Create: `frontend/app/(designer)/tests/[testId]/analytics/page.tsx`
+
+**What:** Build the analytics dashboard. All code provided inline below.
+
+**Dependencies:** Task 15-18 (pattern established), Task 12
+
+**Complexity:** L
 
 - [ ] **Step 1: Install Recharts**
 
 ```bash
-cd frontend && npm install recharts
+cd /Users/bharath/Documents/abtestingapp/frontend && npm install recharts
 ```
 
-- [ ] **Step 2: Write SummaryStats component (with completion rate)**
+- [ ] **Step 2: Write SummaryStats component**
 
 ```tsx
 // frontend/components/analytics/SummaryStats.tsx
@@ -4727,7 +4926,7 @@ export default function SummaryStats({
 }
 ```
 
-- [ ] **Step 3: Write VoteChart component (with fixed tooltip)**
+- [ ] **Step 3: Write VoteChart component**
 
 ```tsx
 // frontend/components/analytics/VoteChart.tsx
@@ -4735,17 +4934,8 @@ export default function SummaryStats({
 
 import { useState } from "react";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
 } from "recharts";
 import type { OptionAnalytics } from "@/lib/types";
 
@@ -4797,8 +4987,6 @@ export default function VoteChart({ options, questionTitle }: VoteChartProps) {
             <YAxis allowDecimals={false} />
             <Tooltip
               formatter={(value: number, _name: string, props: any) => {
-                // Use payload index to get the correct percentage, avoiding
-                // the bug where matching by vote value returns the wrong item on ties.
                 const percentage = props.payload?.percentage ?? 0;
                 return [`${value} votes (${percentage}%)`, "Votes"];
               }}
@@ -4909,7 +5097,7 @@ interface ExportButtonProps {
 
 export default function ExportButton({ testId }: ExportButtonProps) {
   function handleExport() {
-    window.open(getExportUrl(testId), "_blank");
+    window.open(getExportUrl(testId), "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -4920,7 +5108,7 @@ export default function ExportButton({ testId }: ExportButtonProps) {
 }
 ```
 
-- [ ] **Step 6: Write analytics page**
+- [ ] **Step 6: Write analytics page (with null guard for useParams)**
 
 ```tsx
 // frontend/app/(designer)/tests/[testId]/analytics/page.tsx
@@ -4941,6 +5129,10 @@ import ExportButton from "@/components/analytics/ExportButton";
 
 export default function AnalyticsPage() {
   const params = useParams();
+
+  // Null guard for useParams() during prerendering
+  if (!params?.testId) return <p className="text-gray-500">Loading...</p>;
+
   const testId = Number(params.testId);
 
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
@@ -5007,25 +5199,44 @@ export default function AnalyticsPage() {
 }
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Verify TypeScript compilation**
 
 ```bash
-git add "frontend/app/(designer)/tests/" frontend/components/analytics/ frontend/package.json frontend/package-lock.json
-git commit -m "feat: add analytics dashboard with completion rate, fixed tooltip, and Recharts charts"
+cd /Users/bharath/Documents/abtestingapp/frontend && npx tsc --noEmit
 ```
 
+- [ ] **Step 8: Commit**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git add "frontend/app/(designer)/tests/[testId]/analytics/" frontend/components/analytics/ frontend/package.json frontend/package-lock.json
+git commit -m "feat: add analytics dashboard with Recharts, completion rate, and CSV export"
+```
+
+**Acceptance Criteria:**
+- Recharts renders bar and pie charts without SSR errors
+- Summary shows all four metrics including completion rate
+- Bar/pie toggle works
+- Tooltip shows correct percentages even when options are tied
+- Follow-up texts are expandable per option
+- Export button opens CSV download in new tab (with `noopener,noreferrer`)
+- Empty state shown when no responses
+- "Back to Test" link works
+- `useParams()` has null guard
+
+**Test Strategy:** TypeScript compilation + visual verification with test data.
+
 ---
 
-### Phase 4: Polish and Integration
-
----
-
-### Task 18: Backend .gitignore and final main.py
+### Task 20: Verification and Backend .gitignore
 
 **Files:**
 - Create: `backend/.gitignore`
-- Modify: `backend/main.py` (final version with all routers)
-- Create: `.gitignore` (root)
+
+**What:** Verify that the complete main.py (created in Task 5) works with all five routers. Add backend-specific `.gitignore`. Run integration tests to confirm nothing broke. **This task does NOT rewrite main.py** -- it was already written with all routers in Task 5.
+
+**Dependencies:** Task 6, Task 7, Task 8, Task 9, Task 10 (all routes must exist)
+
+**Complexity:** S
 
 - [ ] **Step 1: Write backend .gitignore**
 
@@ -5038,151 +5249,187 @@ media/
 .pytest_cache/
 ```
 
-- [ ] **Step 2: Write root .gitignore**
+- [ ] **Step 2: Verify server starts with all routes**
 
-```
-# Backend
-backend/venv/
-backend/__pycache__/
-backend/**/__pycache__/
-backend/*.pyc
-backend/data/
-backend/media/
-backend/.pytest_cache/
-
-# Frontend
-frontend/node_modules/
-frontend/.next/
-frontend/out/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
+```bash
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && timeout 5 uvicorn main:app --port 8000 || true
 ```
 
-- [ ] **Step 3: Write final main.py**
+- [ ] **Step 3: Run integration tests to verify nothing broke**
 
-```python
-# backend/main.py
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.middleware import SlowAPIMiddleware
-from app.config import CORS_ORIGINS, MEDIA_DIR
-from app.database import create_db_and_tables
-from app.models import Test, ScreenQuestion, Option, Response  # noqa: F401
-from app.routes.tests import router as tests_router
-from app.routes.questions import router as questions_router
-from app.routes.options import router as options_router
-from app.routes.respond import router as respond_router
-from app.routes.analytics import router as analytics_router
-
-# Rate limiter (per-IP)
-limiter = Limiter(key_func=get_remote_address)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    create_db_and_tables()
-    from app.database import engine
-    from sqlmodel import text
-    with engine.connect() as conn:
-        conn.execute(text("PRAGMA journal_mode=WAL"))
-        conn.execute(text("PRAGMA foreign_keys=ON"))
-        conn.commit()
-    yield
-
-
-app = FastAPI(title="DesignPoll API", version="0.1.0", lifespan=lifespan)
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["*"],
-)
-
-MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
-
-app.include_router(tests_router)
-app.include_router(questions_router)
-app.include_router(options_router)
-app.include_router(respond_router)
-app.include_router(analytics_router)
+```bash
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && python -m pytest tests/ -v
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add .gitignore backend/.gitignore backend/main.py
-git commit -m "chore: add gitignore files and finalize main.py with all routers and rate limiter"
+cd /Users/bharath/Documents/abtestingapp && git add backend/.gitignore
+git commit -m "chore: add backend .gitignore and verify all routes work"
 ```
+
+**Acceptance Criteria:**
+- Server starts with all 5 routers loaded
+- Swagger UI shows all endpoints
+- All integration tests pass (both test_workflow.py and test_upload.py)
+- `backend/.gitignore` prevents `venv/`, `data/`, `media/`, `__pycache__/` from being tracked
+
+**Test Strategy:** Server startup + integration test pass.
 
 ---
 
-### Task 19: End-to-end smoke test
+### Task 21: End-to-End Smoke Test
 
-This task is manual verification to confirm everything works together.
+**Files:** None created. This is a manual verification task.
+
+**What:** Verify the complete application works end-to-end with both servers running simultaneously.
+
+**Dependencies:** All previous tasks (1-20)
+
+**Complexity:** M
 
 - [ ] **Step 1: Start backend**
 
 ```bash
-cd backend && source venv/bin/activate && uvicorn main:app --reload --port 8000
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && uvicorn main:app --reload --port 8000
 ```
 
-- [ ] **Step 2: Start frontend**
+- [ ] **Step 2: Start frontend (in a separate terminal)**
 
 ```bash
-cd frontend && npm run dev
+cd /Users/bharath/Documents/abtestingapp/frontend && npm run dev
 ```
 
 - [ ] **Step 3: Verify full flow**
 
-1. Visit `http://localhost:3000` -- see empty dashboard (Client Component, no SSR issues).
-2. Click "New Test" -- create a test named "Homepage Test" with description.
-3. On the test detail page, click "Add Question" -- edit the title to "Which homepage?".
-4. Add two options: one with source_type=upload (with image), one with source_type=url (with URL). Verify both modes work in the OptionEditor radio toggle.
-5. Verify the "Add Option" editor disappears once 5 options are added.
-6. Click "Activate" -- status changes to active, share link appears.
-7. Open the share link in a new tab -- see intro screen, click Start.
-8. Verify responsive grid: options show in a single column on mobile, two columns on wider screens.
-9. Select an option -- it locks in with "Locked in" indicator. For URL options, verify iframe renders with pointer-events disabled and "Open in new tab" link works.
-10. Type follow-up text, click Next/Finish.
-11. See "Thank you" screen.
-12. Go back to test detail, click "Analytics" -- see respondent count, total answers, completed sessions, and completion rate in the summary bar.
-13. Verify chart tooltips show correct percentages even when options have the same vote count.
-14. Click "Export CSV" -- download opens with response data. Verify no CSV injection (cells starting with = are sanitized).
-15. Close the test -- status changes to "Closed", share link returns error.
-16. Verify the respondent page (`/respond/...`) does not show the Navbar.
-17. Verify the ConfirmDialog closes on Escape key press.
+Walk through these checks:
 
-- [ ] **Step 4: Commit any fixes discovered during smoke test**
+1. Visit `http://localhost:3000` -- see empty dashboard (Client Component, no SSR crash)
+2. Click "New Test" -- create test "Homepage Test" with a description
+3. On test detail page, add a question with title "Which homepage?"
+4. Add option with source_type=upload (upload a JPEG/PNG image)
+5. Add option with source_type=url (enter `https://example.com`)
+6. Verify max 5 options enforcement: add options until 5, verify "Add Option" form disappears
+7. Click "Activate" -- status changes to active, share link appears
+8. Open share link (`/respond/{slug}`) in a new/incognito tab -- see intro screen
+9. Verify NO Navbar on respondent page
+10. Click "Start", verify responsive grid (resize browser to mobile width)
+11. Select an option -- verify "Locked in" indicator, no undo possible
+12. For URL options, verify iframe with pointer-events disabled and "Open in new tab" link has `rel="noopener noreferrer"`
+13. Verify the follow-up prompt shows the question-specific `followup_prompt` text (not a hardcoded default)
+14. Type follow-up text, click Next/Finish
+15. See "Thank you" screen
+16. Back on designer side, go to Analytics -- see respondent count, total answers, completion rate
+17. Verify bar/pie chart toggle works
+18. Verify tooltip percentages are correct
+19. Click "Export CSV" -- download should contain response data
+20. Close the test -- share link should return error
+21. Verify ConfirmDialog closes on Escape key
+
+- [ ] **Step 4: Fix any issues found and commit**
 
 ```bash
-git add -A && git commit -m "fix: address issues found during end-to-end smoke test"
+cd /Users/bharath/Documents/abtestingapp && git add -A
+git commit -m "fix: address issues found during end-to-end smoke test"
 ```
+
+(Only if fixes were needed. If no fixes, skip this step.)
+
+**Acceptance Criteria:**
+- All 21 verification steps pass without errors
+- Both servers running simultaneously without port conflicts
+- Client-side navigation works between all pages
+- API calls succeed (check browser DevTools Network tab for any 4xx/5xx)
+
+**Test Strategy:** This IS the test -- a manual walkthrough of the entire application.
 
 ---
 
-## Phase Ordering Summary
+### Task 22: Final Commit and Cleanup
 
-| Phase | Tasks | What it produces |
-|---|---|---|
-| **Phase 1: Backend Foundation** | Tasks 1-10 | Complete REST API with all endpoints, database, image handling, rate limiting, tests |
-| **Phase 2: Frontend Foundation** | Tasks 11-12 | Next.js project with route groups, API client, shared components |
-| **Phase 3: Frontend Pages** | Tasks 13-17 | Dashboard, test builder, respondent flow, analytics (all Client Components) |
-| **Phase 4: Polish** | Tasks 18-19 | Gitignore, final main.py, end-to-end verification |
+**Files:**
+- Potentially modify any files with minor issues found in Task 21
 
-Each phase produces working, testable software. Phase 1 can be tested entirely via Swagger UI and pytest. Phase 2+3 require both servers running. Phase 4 is cleanup and verification.
+**What:** Run the integration test suite one final time, verify TypeScript compilation, and make a clean final commit.
+
+**Dependencies:** Task 21
+
+**Complexity:** S
+
+- [ ] **Step 1: Run backend tests**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/backend && source venv/bin/activate && python -m pytest tests/ -v
+```
+
+Expected: All tests pass.
+
+- [ ] **Step 2: Run frontend type check**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp/frontend && npx tsc --noEmit
+```
+
+Expected: No type errors.
+
+- [ ] **Step 3: Final commit (if any uncommitted changes)**
+
+```bash
+cd /Users/bharath/Documents/abtestingapp && git status
+```
+
+If there are uncommitted changes:
+
+```bash
+git add -A && git commit -m "chore: final cleanup after end-to-end verification"
+```
+
+**Acceptance Criteria:**
+- All backend tests pass (test_workflow.py + test_upload.py)
+- Frontend compiles without TypeScript errors
+- Git working tree is clean (no uncommitted changes)
+- Application is fully functional
+
+**Test Strategy:** Backend pytest + frontend tsc --noEmit + clean git status.
+
+---
+
+## Task Summary Table
+
+| # | Task | Dependencies | Parallel Group | Complexity | Files |
+|---|------|-------------|----------------|------------|-------|
+| 1 | Git Init + Root Files | None | G1 | S | `.gitignore` |
+| 2 | Backend Scaffold | T1 | G2 | M | `main.py`, `config.py`, `database.py`, `utils.py`, `limiter.py`, `requirements.txt` |
+| 3 | Database Models | T2 | G3 | M | `backend/app/models/*.py` |
+| 4 | Pydantic Schemas | T3 | G4 | S | `backend/app/schemas/*.py` |
+| 5 | Image Service + Complete main.py | T4 | G5 | M | `image_service.py`, `main.py` (final), placeholder route files |
+| 6 | Test CRUD Routes | T5 | G6 | L | `backend/app/routes/tests.py` |
+| 7 | Question CRUD Routes | T5 | G6 | M | `backend/app/routes/questions.py` |
+| 8 | Option CRUD Routes | T5 | G6 | L | `backend/app/routes/options.py` |
+| 9 | Respondent Routes | T5, T6 | G6b | M | `backend/app/routes/respond.py` |
+| 10 | Analytics Routes | T6-T9 | G7 | L | `analytics_service.py`, `backend/app/routes/analytics.py` |
+| 11 | Frontend Scaffold | T1 | G2 | M | `frontend/` (create-next-app), layouts |
+| 12 | Frontend Types + API | T11 | G4 | M | `frontend/lib/constants.ts`, `types.ts`, `api.ts` |
+| 13 | Shared UI Components | T11 | G4 | M | `frontend/components/shared/*.tsx`, `layout/Navbar.tsx` |
+| 14 | Backend Integration Test | T6-T10 | G8 | M | `conftest.py`, `test_workflow.py` |
+| 14b | Upload + URL Validation Tests | T6-T10 | G8 | M | `test_upload.py` |
+| 15 | Dashboard Page | T12, T13 | G9 | M | `frontend/app/(designer)/page.tsx` |
+| 16 | Test Builder Page | T12, T13 | G9 | L | `tests/new/page.tsx`, builder components |
+| 17 | Test Detail Page | T12, T13, T16 | G9b | L | `tests/[testId]/page.tsx` |
+| 18 | Respondent Flow Page | T12, T13 | G9 | L | `respond/[slug]/page.tsx`, respondent components |
+| 19 | Analytics Page | T12, T15-T18 | G10 | L | `tests/[testId]/analytics/page.tsx`, chart components |
+| 20 | Verification + Gitignore | T6-T10 | G11 | S | `backend/.gitignore` |
+| 21 | E2E Smoke Test | T1-T20 | G12 | M | None (manual verification) |
+| 22 | Final Cleanup | T21 | G13 | S | None (tests + commit) |
+
+---
+
+## Recommended Execution Order
+
+For **sequential execution** (single agent):
+1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 14b, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22
+
+For **parallel execution** (multiple agents):
+- Agent A (backend): 1 -> 2 -> 3 -> 4 -> 5 -> 6,7,8 (parallel) -> 9 -> 10 -> 14,14b (parallel) -> 20
+- Agent B (frontend): (wait for T1) -> 11 -> 12,13 (parallel) -> 15,16,18 (parallel) -> 17 -> 19
+- Then: 21 -> 22 (sequential, needs both complete)
