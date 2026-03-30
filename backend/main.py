@@ -7,6 +7,12 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.config import CORS_ORIGINS, MEDIA_DIR
 from app.database import create_db_and_tables
 from app.limiter import limiter
+from app.models import Test, ScreenQuestion, Option, Response  # noqa: F401 -- ensure models registered
+from app.routes.tests import router as tests_router
+from app.routes.questions import router as questions_router
+from app.routes.options import router as options_router
+from app.routes.respond import router as respond_router
+from app.routes.analytics import router as analytics_router
 
 
 @asynccontextmanager
@@ -32,3 +38,9 @@ app.add_middleware(
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+app.include_router(tests_router)
+app.include_router(questions_router)
+app.include_router(options_router)
+app.include_router(respond_router)
+app.include_router(analytics_router)
