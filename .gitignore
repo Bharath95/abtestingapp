@@ -19,6 +19,9 @@ frontend/out/
 *.swp
 *.swo
 
+# Claude Code
+.claude/*.local.md
+
 # OS
 .DS_Store
 Thumbs.db
