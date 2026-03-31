@@ -172,13 +172,14 @@ def generate_csv(test: Test, session: Session) -> str:
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["question_title", "option_label", "followup_text", "session_id", "responded_at"])
+    writer.writerow(["respondent_name", "question_title", "option_label", "followup_text", "session_id", "responded_at"])
 
     for q in questions:
         q_responses = responses_by_question.get(q.id, [])
         for r in q_responses:
             option = option_lookup.get(r.option_id)
             writer.writerow([
+                sanitize_csv_cell(r.respondent_name or "Anonymous"),
                 sanitize_csv_cell(q.title),
                 sanitize_csv_cell(option.label if option else "Unknown"),
                 sanitize_csv_cell(r.followup_text or ""),

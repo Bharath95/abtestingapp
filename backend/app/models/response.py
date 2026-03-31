@@ -18,6 +18,7 @@ class Response(SQLModel, table=True):
     screen_question_id: int = Field(foreign_key="screenquestion.id", index=True)
     option_id: int = Field(foreign_key="option.id")
     session_id: str = Field(max_length=36, index=True)
+    respondent_name: str | None = Field(default=None, max_length=200)
     followup_text: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(default_factory=utcnow)
 

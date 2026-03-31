@@ -69,6 +69,7 @@ def submit_answer(slug: str, data: AnswerCreate, session: SessionDep, request: R
         screen_question_id=data.question_id,
         option_id=data.option_id,
         session_id=data.session_id,
+        respondent_name=data.respondent_name,
         followup_text=data.followup_text,
     )
     session.add(response)

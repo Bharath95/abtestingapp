@@ -108,7 +108,7 @@ export async function fetchTestForRespondent(slug: string): Promise<RespondentTe
 
 export async function submitAnswer(
   slug: string,
-  data: { session_id: string; question_id: number; option_id: number; followup_text?: string }
+  data: { session_id: string; respondent_name?: string; question_id: number; option_id: number; followup_text?: string }
 ): Promise<{ status: string }> {
   return apiFetch<{ status: string }>(`/api/v1/respond/${slug}/answers`, {
     method: "POST",

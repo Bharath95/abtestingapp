@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class AnswerCreate(BaseModel):
     session_id: str = Field(max_length=36)
+    respondent_name: str | None = Field(default=None, max_length=200)
     question_id: int
     option_id: int
     followup_text: str | None = Field(default=None, max_length=500)

@@ -73,8 +73,16 @@ export default function AnalyticsPage() {
         completionRate={analytics.completion_rate}
       />
 
-      {analytics.questions.map((q) => (
+      {analytics.questions.map((q, index) => (
         <Card key={q.question_id}>
+          <div className="mb-4">
+            <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">
+              Question {index + 1} of {analytics.questions.length}
+            </span>
+            <span className="text-xs text-gray-400 ml-2">
+              {q.total_votes} {q.total_votes === 1 ? "response" : "responses"}
+            </span>
+          </div>
           <VoteChart options={q.options} questionTitle={q.title} />
           <div className="border-t mt-6 pt-4">
             <FollowUpList options={q.options} />

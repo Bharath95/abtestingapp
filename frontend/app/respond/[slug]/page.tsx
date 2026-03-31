@@ -26,6 +26,7 @@ export default function RespondPage() {
   const [followupText, setFollowupText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sessionId] = useState(() => crypto.randomUUID());
+  const [respondentName, setRespondentName] = useState("");
 
   useEffect(() => {
     if (!slug) return;
@@ -58,6 +59,7 @@ export default function RespondPage() {
     try {
       await submitAnswer(slug, {
         session_id: sessionId,
+        respondent_name: respondentName || undefined,
         question_id: question.id,
         option_id: selectedOptionId,
         followup_text: followupText.trim() || undefined,
@@ -100,7 +102,10 @@ export default function RespondPage() {
       <IntroScreen
         name={test.name}
         description={test.description}
-        onStart={() => setPhase("question")}
+        onStart={(name) => {
+          setRespondentName(name);
+          setPhase("question");
+        }}
       />
     );
   }
