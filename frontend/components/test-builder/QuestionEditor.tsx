@@ -51,6 +51,16 @@ export default function QuestionEditor({
     }
   }
 
+  async function handleToggle(field: string, value: boolean) {
+    setError(null);
+    try {
+      await updateQuestion(question.id, { [field]: value });
+      onUpdate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update setting");
+    }
+  }
+
   async function handleDeleteQuestion() {
     try {
       await deleteQuestion(question.id);
@@ -137,7 +147,10 @@ export default function QuestionEditor({
             <input
               type="checkbox"
               checked={followupRequired}
-              onChange={(e) => setFollowupRequired(e.target.checked)}
+              onChange={(e) => {
+                setFollowupRequired(e.target.checked);
+                handleToggle("followup_required", e.target.checked);
+              }}
               className="rounded border-gray-300"
             />
             Follow-up required
@@ -146,7 +159,10 @@ export default function QuestionEditor({
             <input
               type="checkbox"
               checked={randomizeOptions}
-              onChange={(e) => setRandomizeOptions(e.target.checked)}
+              onChange={(e) => {
+                setRandomizeOptions(e.target.checked);
+                handleToggle("randomize_options", e.target.checked);
+              }}
               className="rounded border-gray-300"
             />
             Randomize options
