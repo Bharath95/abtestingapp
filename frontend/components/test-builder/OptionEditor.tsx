@@ -96,13 +96,29 @@ export default function OptionEditor({
       {sourceType === "upload" ? (
         <ImageUploader currentImageUrl={initialImageUrl} onFileSelect={setImageFile} />
       ) : (
-        <input
-          type="url"
-          value={sourceUrl}
-          onChange={(e) => setSourceUrl(e.target.value)}
-          placeholder="https://example.com/your-design"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-        />
+        <div className="space-y-2">
+          <input
+            type="url"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+            placeholder="https://example.com/your-design"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+          />
+          {(sourceUrl.trim().startsWith("http://") || sourceUrl.trim().startsWith("https://")) && (
+            <div className="border border-gray-200 rounded-lg overflow-hidden bg-gray-50">
+              <iframe
+                src={sourceUrl.trim()}
+                title="URL Preview"
+                className="w-full h-48 rounded"
+                sandbox="allow-scripts allow-same-origin"
+                style={{ pointerEvents: "none" }}
+              />
+              <p className="text-xs text-gray-400 text-center py-1">
+                Preview may not load for sites that block embedding
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
       <Button size="sm" onClick={handleSave} disabled={saving || !canSave}>
