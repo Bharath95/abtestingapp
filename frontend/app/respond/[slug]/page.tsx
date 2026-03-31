@@ -144,6 +144,10 @@ export default function RespondPage() {
           />
         )}
 
+        {isLocked && question.followup_required && !followupText.trim() && (
+          <p className="text-amber-600 text-sm mt-2">Please share your reasoning above to continue.</p>
+        )}
+
         {errorMsg && (
           <p className="text-red-500 text-sm mt-4">{errorMsg}</p>
         )}
