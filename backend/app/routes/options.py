@@ -63,7 +63,7 @@ async def create_option(
         max_order = session.exec(
             select(func.max(Option.order)).where(Option.screen_question_id == question_id)
         ).one()
-        order = (max_order or -1) + 1
+        order = (max_order + 1) if max_order is not None else 0
 
     image_filename = None
     original_filename = None

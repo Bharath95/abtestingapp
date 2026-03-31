@@ -58,7 +58,7 @@ def create_question(test_id: int, data: QuestionCreate, session: SessionDep):
     max_order = session.exec(
         select(func.max(ScreenQuestion.order)).where(ScreenQuestion.test_id == test_id)
     ).one()
-    next_order = (max_order or -1) + 1
+    next_order = (max_order + 1) if max_order is not None else 0
 
     question = ScreenQuestion(
         test_id=test_id,
